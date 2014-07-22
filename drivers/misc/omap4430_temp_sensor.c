@@ -56,15 +56,6 @@
 extern void omap_thermal_throttle(void);
 extern void omap_thermal_unthrottle(void);
 
-static void throttle_delayed_work_fn(struct work_struct *work);
-
-#define THROTTLE_DELAY_MS	1000
-
-#define TSHUT_THRESHOLD_TSHUT_HOT	110000	/* 110 deg C */
-#define TSHUT_THRESHOLD_TSHUT_COLD	100000	/* 100 deg C */
-#define BGAP_THRESHOLD_T_HOT		64000	/* 64 deg C */
-#define BGAP_THRESHOLD_T_COLD		61000	/* 61 deg C */
-
 /**
  * OMAP4430_* definitions from
  * linux-3.16/drivers/thermal/ti-soc-thermal/omap4xxx-bandgap.h
@@ -129,7 +120,6 @@ struct omap_temp_sensor {
 	u8 clk_on;
 	unsigned long clk_rate;
 	u32 current_temp;
-//	struct delayed_work throttle_work;
 };
 
 #ifdef CONFIG_PM
@@ -378,36 +368,6 @@ out:
 	return ret;
 }
 
-#ifdef 0 /* This not used on generated on OMAP4430 */
-/*
- * Check if the die sensor is cooling down. If it's higher than
- * t_hot since the last throttle then throttle it again.
- * OMAP junction temperature could stay for a long time in an
- * unacceptable temperature range. The idea here is to check after
- * t_hot->throttle the system really came below t_hot else re-throttle
- * and keep doing till it's under t_hot temp range.
- */
-static void throttle_delayed_work_fn(struct work_struct *work)
-{
-	int curr;
-	struct omap_temp_sensor *temp_sensor =
-				container_of(work, struct omap_temp_sensor,
-					     throttle_work.work);
-	curr = omap_read_current_temp(temp_sensor);
-
-	if (curr >= BGAP_THRESHOLD_T_HOT || curr < 0) {
-		pr_warn("%s: OMAP temp read %d exceeds the threshold\n",
-			__func__, curr);
-		omap_thermal_throttle();
-		schedule_delayed_work(&temp_sensor->throttle_work,
-			msecs_to_jiffies(THROTTLE_DELAY_MS));
-	} else {
-		schedule_delayed_work(&temp_sensor->throttle_work,
-			msecs_to_jiffies(THROTTLE_DELAY_MS));
-	}
-}
-#endif
-
 static irqreturn_t omap_tshut_irq_handler(int irq, void *data)
 {
 	struct omap_temp_sensor *temp_sensor = (struct omap_temp_sensor *)data;
@@ -434,36 +394,6 @@ static irqreturn_t omap_tshut_irq_handler(int irq, void *data)
 
 	return IRQ_HANDLED;
 }
-
-#ifdef 0 /* This IRQ does not exist on OMAP4430 */
-static irqreturn_t omap_talert_irq_handler(int irq, void *data)
-{
-	struct omap_temp_sensor *temp_sensor = (struct omap_temp_sensor *)data;
-	int t_hot, t_cold, temp_offset;
-
-	t_hot = omap_temp_sensor_readl(temp_sensor, BGAP_STATUS_OFFSET)
-	    & OMAP4_HOT_FLAG_MASK;
-	t_cold = omap_temp_sensor_readl(temp_sensor, BGAP_STATUS_OFFSET)
-	    & OMAP4_COLD_FLAG_MASK;
-	temp_offset = omap_temp_sensor_readl(temp_sensor, BGAP_CTRL_OFFSET);
-	if (t_hot) {
-		omap_thermal_throttle();
-		schedule_delayed_work(&temp_sensor->throttle_work,
-			msecs_to_jiffies(THROTTLE_DELAY_MS));
-		temp_offset &= ~(OMAP4_MASK_HOT_MASK);
-		temp_offset |= OMAP4_MASK_COLD_MASK;
-	} else if (t_cold) {
-		cancel_delayed_work_sync(&temp_sensor->throttle_work);
-		omap_thermal_unthrottle();
-		temp_offset &= ~(OMAP4_MASK_COLD_MASK);
-		temp_offset |= OMAP4_MASK_HOT_MASK;
-	}
-
-	omap_temp_sensor_writel(temp_sensor, temp_offset, BGAP_CTRL_OFFSET);
-
-	return IRQ_HANDLED;
-}
-#endif
 
 static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 {
@@ -530,11 +460,6 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 		goto clk_get_err;
 	}
 
-        /* TODO: Will we need this? */
-	/* Init delayed work for throttle decision */
-//	INIT_DELAYED_WORK(&temp_sensor->throttle_work,
-//			  throttle_delayed_work_fn);
-
 	platform_set_drvdata(pdev, temp_sensor);
 
 	ret = omap_temp_sensor_enable(temp_sensor);
@@ -576,7 +501,6 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 sysfs_create_err:
         if (temp_sensor->tshut_irq > 0)
 	        free_irq(temp_sensor->tshut_irq, temp_sensor);
-//	cancel_delayed_work_sync(&temp_sensor->throttle_work);
 tshut_irq_req_err:
 	omap_temp_sensor_disable(temp_sensor);
 sensor_enable_err:
@@ -597,7 +521,6 @@ static int __devexit omap_temp_sensor_remove(struct platform_device *pdev)
 	struct omap_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
 
 	sysfs_remove_group(&pdev->dev.kobj, &omap_temp_sensor_group);
-//	cancel_delayed_work_sync(&temp_sensor->throttle_work);
 	omap_temp_sensor_disable(temp_sensor);
 	clk_put(temp_sensor->clock);
 	platform_set_drvdata(pdev, NULL);

@@ -403,6 +403,8 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	struct resource *mem;
 	int ret = 0;
 
+	dev_info(dev, "%s starting probing", pdata->name);
+
 	if (!pdata) {
 		dev_err(dev, "%s: platform data missing\n", __func__);
 		return -EINVAL;
@@ -607,6 +609,54 @@ static struct platform_driver omap_temp_sensor_driver = {
 	},
 };
 
+/* from arch/arm/mach-omap2/temp_sensor_device.c */
+static struct omap_device_pm_latency omap_temp_sensor_latency[] = {
+	{
+	 .deactivate_func = omap_device_idle_hwmods,
+	 .activate_func = omap_device_enable_hwmods,
+	 .flags = OMAP_DEVICE_LATENCY_AUTO_ADJUST,
+	}
+};
+
+/* from arch/arm/mach-omap2/temp_sensor_device.c */
+static int temp_sensor_dev_init(struct omap_hwmod *oh, void *user)
+{
+	struct omap_temp_sensor_pdata *temp_sensor_pdata;
+	struct omap_device *od;
+	static int i;
+	int ret = 0;
+
+	temp_sensor_pdata =
+	    kzalloc(sizeof(struct omap_temp_sensor_pdata), GFP_KERNEL);
+	if (!temp_sensor_pdata) {
+		pr_err
+		    ("%s: Unable to allocate memory for %s.Error!\n",
+			__func__, oh->name);
+		return -ENOMEM;
+	}
+
+	temp_sensor_pdata->offset = OMAP4_CTRL_MODULE_CORE_TEMP_SENSOR;
+
+	temp_sensor_pdata->name = "omap_temp_sensor";
+
+	od = omap_device_build(temp_sensor_pdata->name, i, oh, temp_sensor_pdata,
+			       sizeof(*temp_sensor_pdata),
+			       omap_temp_sensor_latency,
+			       ARRAY_SIZE(omap_temp_sensor_latency), 0);
+	if (IS_ERR(od)) {
+		pr_warning("%s: Could not build omap_device for %s: %s.\n\n",
+			   __func__, temp_sensor_pdata->name, oh->name);
+		ret = -EINVAL;
+		goto done;
+	}
+
+	i++;
+done:
+	kfree(temp_sensor_pdata);
+	return ret;
+}
+
+
 int __init omap_temp_sensor_init(void)
 {
         int ret;
@@ -616,11 +666,16 @@ int __init omap_temp_sensor_init(void)
 		return 0;
         }
 
-	if ((ret = platform_driver_register(&omap_temp_sensor_driver))) {
-		pr_err("platform_driver_register() failed\n");
+	if ((ret = omap_hwmod_for_each_by_class("thermal_sensor",
+						temp_sensor_dev_init, NULL))) {
+		pr_err("omap_hwmod_for_each_by_class() failed: %d\n", ret);
+		return ret;
+	} else if ((ret = platform_driver_register(&omap_temp_sensor_driver))) {
+		pr_err("platform_driver_register() failed: %d\n", ret);
+                return ret;
+        } else {
+                return 0;
         }
-
-        return ret;
 }
 
 static void __exit omap_temp_sensor_exit(void)

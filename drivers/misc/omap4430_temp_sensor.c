@@ -566,17 +566,6 @@ static int omap_temp_sensor_resume(struct platform_device *pdev)
 	return 0;
 }
 
-void omap_temp_sensor_idle(int idle_state)
-{
-	if (!temp_sensor_pm)
-		return;
-
-	if (idle_state)
-		omap_temp_sensor_disable(temp_sensor_pm);
-	else
-		omap_temp_sensor_enable(temp_sensor_pm);
-}
-
 #else
 omap_temp_sensor_suspend NULL
 omap_temp_sensor_resume NULL

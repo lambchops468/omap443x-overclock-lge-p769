@@ -51,10 +51,37 @@
 
 #include <mach/ctrl_module_core_44xx.h>
 
+#include <linux/kallsyms.h>
+#include "symsearch/symsearch.h"
+
 #define DRIVER_NAME "omap443x_temp_sensor"
 
-extern void omap_thermal_throttle(void);
-extern void omap_thermal_unthrottle(void);
+/* arch/arm/mach-omap2/control.c */
+SYMSEARCH_DECLARE_FUNCTION_STATIC(u32, omap_ctrl_readl_s, u16 offset);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(void, omap_ctrl_writel_s, u32 val, u16 offset);
+/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
+SYMSEARCH_DECLARE_FUNCTION_STATIC(void, omap_thermal_throttle_s, void);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(void, omap_thermal_unthrottle_s, void);
+/* arch/arm/plat-omap/omap-pm-interface.c */
+SYMSEARCH_DECLARE_FUNCTION_STATIC(bool, omap_pm_was_context_lost_s,
+	struct device *dev);
+/* arch/arm/plat-omap/omap_device.c */
+SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_device*, omap_device_build_s,
+	const char *pdev_name, int pdev_id, struct omap_hwmod *oh, void *pdata,
+	int pdata_len, struct omap_device_pm_latency *pm_lats, int pm_lats_cnt,
+	int is_early_device);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_enable_hwmods_s,
+        struct omap_device *od);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_idle_hwmods_s,
+        struct omap_device *od);
+/* arch/arm/mach-omap2/omap_hwmod.c */
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_hwmod_for_each_by_class_s,
+	const char *classname,
+		int (*fn)(struct omap_hwmod *oh,
+			void *user),
+	void *user);
+
+
 
 /**
  * OMAP4430_* definitions from
@@ -152,13 +179,13 @@ omap4430_adc_to_temp[OMAP4430_ADC_END_VALUE - OMAP4430_ADC_START_VALUE + 1] = {
 static unsigned long omap_temp_sensor_readl(struct omap_temp_sensor
 					    *temp_sensor, u32 reg)
 {
-	return omap_ctrl_readl(temp_sensor->phy_base + reg);
+	return omap_ctrl_readl_s(temp_sensor->phy_base + reg);
 }
 
 static void omap_temp_sensor_writel(struct omap_temp_sensor *temp_sensor,
 				    u32 val, u32 reg)
 {
-	omap_ctrl_writel(val, (temp_sensor->phy_base + reg));
+	omap_ctrl_writel_s(val, (temp_sensor->phy_base + reg));
 }
 
 static int adc_to_temp_conversion(int adc_val)
@@ -265,9 +292,9 @@ static ssize_t omap_throttle_store(struct device *dev,
 	struct device_attribute *devattr, const char *buf, size_t count)
 {
 	if (count && buf[0] == '1')
-		omap_thermal_throttle();
+		omap_thermal_throttle_s();
 	else
-		omap_thermal_unthrottle();
+		omap_thermal_unthrottle_s();
 
 	return count;
 }
@@ -381,11 +408,11 @@ static irqreturn_t omap_tshut_irq_handler(int irq, void *data)
 
                 /* Knock it down two steps so we're generating
                  * less heat while shutting down */
-		omap_thermal_throttle();
+		omap_thermal_throttle_s();
                 /* Assuming omap_thermal_throttle() not designed to
                  * be called in rapid succession */
                 mdelay(5);
-		omap_thermal_throttle();
+		omap_thermal_throttle_s();
 
                 orderly_poweroff(true);
 	} else {
@@ -587,7 +614,7 @@ static int omap_temp_sensor_runtime_resume(struct device *dev)
 {
 	struct omap_temp_sensor *temp_sensor =
 			platform_get_drvdata(to_platform_device(dev));
-	if (omap_pm_was_context_lost(dev)) {
+	if (omap_pm_was_context_lost_s(dev)) {
 		omap_temp_sensor_restore_ctxt(temp_sensor);
 	}
 	return 0;
@@ -612,8 +639,8 @@ static struct platform_driver omap_temp_sensor_driver = {
 /* from arch/arm/mach-omap2/temp_sensor_device.c */
 static struct omap_device_pm_latency omap_temp_sensor_latency[] = {
 	{
-	 .deactivate_func = omap_device_idle_hwmods,
-	 .activate_func = omap_device_enable_hwmods,
+	 .deactivate_func = NULL, /* set in omap_temp_sensor_init() */
+	 .activate_func = NULL,
 	 .flags = OMAP_DEVICE_LATENCY_AUTO_ADJUST,
 	}
 };
@@ -639,10 +666,11 @@ static int temp_sensor_dev_init(struct omap_hwmod *oh, void *user)
 
 	temp_sensor_pdata->name = "omap_temp_sensor";
 
-	od = omap_device_build(temp_sensor_pdata->name, i, oh, temp_sensor_pdata,
-			       sizeof(*temp_sensor_pdata),
-			       omap_temp_sensor_latency,
-			       ARRAY_SIZE(omap_temp_sensor_latency), 0);
+	od = omap_device_build_s(temp_sensor_pdata->name, i, oh,
+				 temp_sensor_pdata,
+				 sizeof(*temp_sensor_pdata),
+				 omap_temp_sensor_latency,
+				 ARRAY_SIZE(omap_temp_sensor_latency), 0);
 	if (IS_ERR(od)) {
 		pr_warning("%s: Could not build omap_device for %s: %s.\n\n",
 			   __func__, temp_sensor_pdata->name, oh->name);
@@ -666,7 +694,25 @@ int __init omap_temp_sensor_init(void)
 		return 0;
         }
 
-	if ((ret = omap_hwmod_for_each_by_class("bandgap",
+        /* arch/arm/mach-omap2/control.c */
+        SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_ctrl_readl, omap_ctrl_readl_s);
+        SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_ctrl_writel, omap_ctrl_writel_s);
+	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
+	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_thermal_throttle, omap_thermal_throttle_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_thermal_unthrottle, omap_thermal_unthrottle_s);
+	/* arch/arm/plat-omap/omap-pm-interface.c */
+	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_pm_was_context_lost, omap_pm_was_context_lost_s);
+	/* arch/arm/plat-omap/omap_device.c */
+	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_device_build, omap_device_build_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_device_enable_hwmods, omap_device_enable_hwmods_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_device_idle_hwmods, omap_device_idle_hwmods_s);
+	/* arch/arm/mach-omap2/omap_hwmod.c */
+	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_hwmod_for_each_by_class, omap_hwmod_for_each_by_class_s);
+
+        omap_temp_sensor_latency[0].deactivate_func = omap_device_idle_hwmods_s;
+        omap_temp_sensor_latency[0].activate_func = omap_device_enable_hwmods_s;
+
+	if ((ret = omap_hwmod_for_each_by_class_s("bandgap",
 						temp_sensor_dev_init, NULL))) {
 		pr_err("omap_hwmod_for_each_by_class() failed: %d\n", ret);
 		return ret;

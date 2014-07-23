@@ -71,9 +71,9 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_device*, omap_device_build_s,
 	int pdata_len, struct omap_device_pm_latency *pm_lats, int pm_lats_cnt,
 	int is_early_device);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_enable_hwmods_s,
-        struct omap_device *od);
+	struct omap_device *od);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_idle_hwmods_s,
-        struct omap_device *od);
+	struct omap_device *od);
 
 
 
@@ -204,12 +204,12 @@ static int temp_to_adc_conversion(long temp)
 
 static inline int omap_read_temp(struct omap_temp_sensor *temp_sensor)
 {
-        int temp;
+	int temp;
 
 	temp = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
 	temp &= (OMAP4430_BGAP_TEMP_SENSOR_DTEMP_MASK);
 
-        return temp;
+	return temp;
 }
 
 static int omap_read_current_temp(struct omap_temp_sensor *temp_sensor)
@@ -320,9 +320,9 @@ static int omap_temp_sensor_enable(struct omap_temp_sensor *temp_sensor)
 		goto out;
 	}
 
-        /* Enables the clock, see _od_runtime_suspend() in
-         * arch/arm/plat-omap/omap_device.c
-         */
+	/* Enables the clock, see _od_runtime_suspend() in
+	 * arch/arm/plat-omap/omap_device.c
+	 */
 	ret = pm_runtime_get_sync(&temp_sensor->pdev->dev);
 	if (ret) {
 		pr_err("%s:get sync failed\n", __func__);
@@ -400,15 +400,15 @@ static irqreturn_t omap_tshut_irq_handler(int irq, void *data)
 		pr_emerg("%s: Thermal shutdown reached, poweroff\n",
 			__func__);
 
-                /* Knock it down two steps so we're generating
-                 * less heat while shutting down */
+		/* Knock it down two steps so we're generating
+		 * less heat while shutting down */
 		omap_thermal_throttle_s();
-                /* Assuming omap_thermal_throttle() not designed to
-                 * be called in rapid succession */
-                mdelay(5);
+		/* Assuming omap_thermal_throttle() not designed to
+		 * be called in rapid succession */
+		mdelay(5);
 		omap_thermal_throttle_s();
 
-                orderly_poweroff(true);
+		orderly_poweroff(true);
 	} else {
 		pr_err("%s:Invalid EFUSE, Non-trimmed BGAP\n", __func__);
 	}
@@ -449,16 +449,16 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(dev, "%s: Could not get tshut_gpio\n",
 			__func__);
-	        temp_sensor->tshut_irq = 0;
+		temp_sensor->tshut_irq = 0;
 	} else {
-	        temp_sensor->tshut_irq = gpio_to_irq(OMAP_TSHUT_GPIO);
-	        if (temp_sensor->tshut_irq < 0) {
-	        	dev_err(dev, "%s:Cannot get thermal shutdown irq\n",
-	        		__func__);
-                        ret = -EINVAL;
-                        goto get_tshut_irq_err;
-	        }
-        }
+		temp_sensor->tshut_irq = gpio_to_irq(OMAP_TSHUT_GPIO);
+		if (temp_sensor->tshut_irq < 0) {
+			dev_err(dev, "%s:Cannot get thermal shutdown irq\n",
+				__func__);
+			ret = -EINVAL;
+			goto get_tshut_irq_err;
+		}
+	}
 
 	temp_sensor->phy_base = pdata->offset;
 	temp_sensor->pdev = pdev;
@@ -498,16 +498,16 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	/* Read the temperature once due to hw issue*/
 	omap_read_current_temp(temp_sensor);
 
-        if (temp_sensor->tshut_irq > 0) {
-	        ret = request_threaded_irq(temp_sensor->tshut_irq, NULL,
-	        		omap_tshut_irq_handler,
-	        		IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-	        		"tshut", (void *)temp_sensor);
-	        if (ret) {
-	        	dev_err(dev, "Request threaded irq failed for TSHUT.\n");
-	        	goto tshut_irq_req_err;
-	        }
-        }
+	if (temp_sensor->tshut_irq > 0) {
+		ret = request_threaded_irq(temp_sensor->tshut_irq, NULL,
+				omap_tshut_irq_handler,
+				IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+				"tshut", (void *)temp_sensor);
+		if (ret) {
+			dev_err(dev, "Request threaded irq failed for TSHUT.\n");
+			goto tshut_irq_req_err;
+		}
+	}
 
 	ret = sysfs_create_group(&pdev->dev.kobj, &omap_temp_sensor_group);
 	if (ret) {
@@ -522,8 +522,8 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	return 0;
 
 sysfs_create_err:
-        if (temp_sensor->tshut_irq > 0)
-	        free_irq(temp_sensor->tshut_irq, temp_sensor);
+	if (temp_sensor->tshut_irq > 0)
+		free_irq(temp_sensor->tshut_irq, temp_sensor);
 tshut_irq_req_err:
 	omap_temp_sensor_disable(temp_sensor);
 sensor_enable_err:
@@ -532,8 +532,8 @@ sensor_enable_err:
 clk_get_err:
 	pm_runtime_disable(dev);
 get_tshut_irq_err:
-        if (temp_sensor->tshut_irq > 0)
-	        gpio_free(OMAP_TSHUT_GPIO);
+	if (temp_sensor->tshut_irq > 0)
+		gpio_free(OMAP_TSHUT_GPIO);
 plat_res_err:
 	kfree(temp_sensor);
 	return ret;
@@ -689,9 +689,9 @@ int __init omap_temp_sensor_init(void)
 		return 0;
         }
 
-        /* arch/arm/mach-omap2/control.c */
-        SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_ctrl_readl, omap_ctrl_readl_s);
-        SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_ctrl_writel, omap_ctrl_writel_s);
+	/* arch/arm/mach-omap2/control.c */
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_ctrl_readl, omap_ctrl_readl_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_ctrl_writel, omap_ctrl_writel_s);
 	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 	SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_thermal_throttle, omap_thermal_throttle_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_thermal_unthrottle, omap_thermal_unthrottle_s);

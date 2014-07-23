@@ -74,12 +74,6 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_enable_hwmods_s,
         struct omap_device *od);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_idle_hwmods_s,
         struct omap_device *od);
-/* arch/arm/mach-omap2/omap_hwmod.c */
-SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_hwmod_for_each_by_class_s,
-	const char *classname,
-		int (*fn)(struct omap_hwmod *oh,
-			void *user),
-	void *user);
 
 
 
@@ -687,6 +681,7 @@ done:
 
 int __init omap_temp_sensor_init(void)
 {
+        struct omap_hwmod *omap443x_bandgap_hwmod_p = NULL;
         int ret;
 
 	if (!cpu_is_omap443x()) {
@@ -706,15 +701,18 @@ int __init omap_temp_sensor_init(void)
 	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_device_build, omap_device_build_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_device_enable_hwmods, omap_device_enable_hwmods_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_device_idle_hwmods, omap_device_idle_hwmods_s);
-	/* arch/arm/mach-omap2/omap_hwmod.c */
-	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_hwmod_for_each_by_class, omap_hwmod_for_each_by_class_s);
+        /* arch/arm/mach-omap2/omap_hwmod_44xx_data.c */
+        omap443x_bandgap_hwmod_p = (struct omap_hwmod*) lookup_symbol_address("omap443x_bandgap_hwmod");
+        if (!omap443x_bandgap_hwmod_p) {
+                pr_err("Could not find symbol: omap443x_bandgap_hwmod\n");
+                return -EBUSY;
+        }
 
         omap_temp_sensor_latency[0].deactivate_func = omap_device_idle_hwmods_s;
         omap_temp_sensor_latency[0].activate_func = omap_device_enable_hwmods_s;
 
-	if ((ret = omap_hwmod_for_each_by_class_s("bandgap",
-						temp_sensor_dev_init, NULL))) {
-		pr_err("omap_hwmod_for_each_by_class() failed: %d\n", ret);
+	if ((ret = temp_sensor_dev_init(omap443x_bandgap_hwmod_p, NULL))) {
+		pr_err("temp_sensor_dev_init() failed: %d\n", ret);
 		return ret;
 	} else if ((ret = platform_driver_register(&omap_temp_sensor_driver))) {
 		pr_err("platform_driver_register() failed: %d\n", ret);

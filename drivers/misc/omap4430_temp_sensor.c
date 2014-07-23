@@ -690,17 +690,17 @@ int __init omap_temp_sensor_init(void)
         }
 
         /* arch/arm/mach-omap2/control.c */
-        SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_ctrl_readl, omap_ctrl_readl_s);
-        SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_ctrl_writel, omap_ctrl_writel_s);
+        SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_ctrl_readl, omap_ctrl_readl_s);
+        SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_ctrl_writel, omap_ctrl_writel_s);
 	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
-	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_thermal_throttle, omap_thermal_throttle_s);
-	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_thermal_unthrottle, omap_thermal_unthrottle_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_thermal_throttle, omap_thermal_throttle_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_thermal_unthrottle, omap_thermal_unthrottle_s);
 	/* arch/arm/plat-omap/omap-pm-interface.c */
-	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_pm_was_context_lost, omap_pm_was_context_lost_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_pm_was_context_lost, omap_pm_was_context_lost_s);
 	/* arch/arm/plat-omap/omap_device.c */
-	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_device_build, omap_device_build_s);
-	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_device_enable_hwmods, omap_device_enable_hwmods_s);
-	SYMSEARCH_BIND_FUNCTION_TO(omap4430_temp_sensor, omap_device_idle_hwmods, omap_device_idle_hwmods_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_device_build, omap_device_build_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_device_enable_hwmods, omap_device_enable_hwmods_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_temp_sensor, omap_device_idle_hwmods, omap_device_idle_hwmods_s);
         /* arch/arm/mach-omap2/omap_hwmod_44xx_data.c */
         omap443x_bandgap_hwmod_p = (struct omap_hwmod*) lookup_symbol_address("omap443x_bandgap_hwmod");
         if (!omap443x_bandgap_hwmod_p) {

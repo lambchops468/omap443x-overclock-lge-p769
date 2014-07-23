@@ -243,7 +243,7 @@ static int omap_force_single_read(struct omap_temp_sensor *temp_sensor)
 
 	/* Start of Conversion = 1 */
 	temp = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
-	temp = temp | OMAP4430_BGAP_TEMP_SENSOR_SOC_MASK;
+	temp |= OMAP4430_BGAP_TEMP_SENSOR_SOC_MASK;
 	omap_temp_sensor_writel(temp_sensor, temp, TEMP_SENSOR_CTRL_OFFSET);
 	/* Wait until DTEMP is updated */
 	temp = omap_read_temp(temp_sensor);
@@ -261,13 +261,41 @@ static int omap_force_single_read(struct omap_temp_sensor *temp_sensor)
 
 static void omap_enable_continuous_mode(struct omap_temp_sensor *temp_sensor)
 {
-	u32 val;
+	u32 val, counter;
 
+	/* Wait for EOCZ to go low */
+	counter = 100;
 	val = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
+	while (val & OMAP4430_BGAP_TEMP_SENSOR_EOCZ_MASK && --counter) {
+		val = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
+		udelay(100);
+	}
 
+	/* Enable continuous mode */
+	val = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
 	val = val | OMAP4430_SINGLE_MODE_MASK;
-
 	omap_temp_sensor_writel(temp_sensor, val, TEMP_SENSOR_CTRL_OFFSET);
+
+	/* Start ADC conversion */
+	/* Start of Conversion = 1 */
+	val = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
+	val |= OMAP4430_BGAP_TEMP_SENSOR_SOC_MASK;
+	omap_temp_sensor_writel(temp_sensor, val, TEMP_SENSOR_CTRL_OFFSET);
+
+	/* Wait for EOCZ to go high */
+	counter = 100;
+	val = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
+	while (!(val & OMAP4430_BGAP_TEMP_SENSOR_EOCZ_MASK) && --counter) {
+		val = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
+		udelay(100);
+	}
+
+	/* Start of Conversion = 0 */
+	val = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
+	val &= ~(OMAP4430_BGAP_TEMP_SENSOR_SOC_MASK);
+	omap_temp_sensor_writel(temp_sensor, val, TEMP_SENSOR_CTRL_OFFSET);
+
+	/* DTEMP will be updated in <= 36 cycles */
 }
 
 /*
@@ -345,7 +373,7 @@ static int omap_temp_sensor_enable(struct omap_temp_sensor *temp_sensor)
 	udelay(5);	/* wait for 5 us */
 
         /* Perform a single read just before enabling continuous */
-	omap_force_single_read(temp_sensor);
+	//omap_force_single_read(temp_sensor);
 	omap_enable_continuous_mode(temp_sensor);
 
 	temp_sensor->clk_on = 1;

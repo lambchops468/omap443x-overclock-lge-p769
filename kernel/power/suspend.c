@@ -29,7 +29,7 @@
 #endif
 
 #ifdef CONFIG_MACH_LGE
-#include <../../arch/arm/mach-omap2/lge/include/lge/lge_blocking_monitor.h>
+#include "../../../arch/arm/mach-omap2/lge/include/lge/lge_blocking_monitor.h"
 #endif
 
 #include "power.h"

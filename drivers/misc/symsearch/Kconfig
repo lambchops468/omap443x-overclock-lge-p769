@@ -1,0 +1,9 @@
+#
+# Symbol Search for non-exported symbols
+#
+
+config SYMSEARCH
+        tristate "Symbol search for finding un-exported symbols"
+        depends on ARM
+        default n
+        help

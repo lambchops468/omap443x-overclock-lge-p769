@@ -658,7 +658,7 @@ static int temp_sensor_dev_init(struct omap_hwmod *oh, void *user)
 
 	temp_sensor_pdata->offset = OMAP4_CTRL_MODULE_CORE_TEMP_SENSOR;
 
-	temp_sensor_pdata->name = "omap_temp_sensor";
+	temp_sensor_pdata->name = DRIVER_NAME;
 
 	od = omap_device_build_s(temp_sensor_pdata->name, i, oh,
 				 temp_sensor_pdata,

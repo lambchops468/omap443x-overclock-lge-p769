@@ -666,7 +666,7 @@ int __init omap_temp_sensor_init(void)
 		return 0;
         }
 
-	if ((ret = omap_hwmod_for_each_by_class("thermal_sensor",
+	if ((ret = omap_hwmod_for_each_by_class("bandgap",
 						temp_sensor_dev_init, NULL))) {
 		pr_err("omap_hwmod_for_each_by_class() failed: %d\n", ret);
 		return ret;

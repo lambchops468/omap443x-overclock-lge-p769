@@ -263,6 +263,11 @@ static void omap_enable_continuous_mode(struct omap_temp_sensor *temp_sensor)
 {
 	u32 val, counter;
 
+	/* Disable continuous mode */
+	val = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
+	val &= ~(OMAP4430_SINGLE_MODE_MASK);
+	omap_temp_sensor_writel(temp_sensor, val, TEMP_SENSOR_CTRL_OFFSET);
+
 	/* Wait for EOCZ to go low */
 	counter = 100;
 	val = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);

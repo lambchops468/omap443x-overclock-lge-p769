@@ -63,9 +63,6 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(void, omap_ctrl_writel_s, u32 val, u16 offset)
 /* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(void, omap_thermal_throttle_s, void);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(void, omap_thermal_unthrottle_s, void);
-/* arch/arm/plat-omap/omap-pm-interface.c */
-SYMSEARCH_DECLARE_FUNCTION_STATIC(bool, omap_pm_was_context_lost_s,
-	struct device *dev);
 /* arch/arm/plat-omap/omap_device.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_device*, omap_device_build_s,
 	const char *pdev_name, int pdev_id, struct omap_hwmod *oh, void *pdata,
@@ -144,15 +141,6 @@ struct omap_temp_sensor {
 	u32 current_temp;
 };
 
-#ifdef CONFIG_PM
-struct omap_temp_sensor_regs {
-	u32 temp_sensor_ctrl;
-};
-
-static struct omap_temp_sensor_regs temp_sensor_context;
-static struct omap_temp_sensor *temp_sensor_pm;
-#endif
-
 /*
  * Temperature values in milli degree celsius
  * ADC code values from 0 to 127
@@ -230,33 +218,6 @@ static int omap_read_current_temp(struct omap_temp_sensor *temp_sensor)
 	}
 
 	return adc_to_temp_conversion(adc);
-}
-
-static int omap_force_single_read(struct omap_temp_sensor *temp_sensor)
-{
-	u32 temp = 0, counter = 1000;
-
-	/* Select single conversion mode */
-	temp = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
-	temp &= ~(OMAP4430_SINGLE_MODE_MASK);
-	omap_temp_sensor_writel(temp_sensor, temp, TEMP_SENSOR_CTRL_OFFSET);
-
-	/* Start of Conversion = 1 */
-	temp = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
-	temp |= OMAP4430_BGAP_TEMP_SENSOR_SOC_MASK;
-	omap_temp_sensor_writel(temp_sensor, temp, TEMP_SENSOR_CTRL_OFFSET);
-	/* Wait until DTEMP is updated */
-	temp = omap_read_temp(temp_sensor);
-
-	while ((temp == 0) && --counter)
-	        temp = omap_read_temp(temp_sensor);
-
-	/* Start of Conversion = 0 */
-	temp = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
-	temp &= ~(OMAP4430_BGAP_TEMP_SENSOR_SOC_MASK);
-	omap_temp_sensor_writel(temp_sensor, temp, TEMP_SENSOR_CTRL_OFFSET);
-
-	return 0;
 }
 
 static void omap_enable_continuous_mode(struct omap_temp_sensor *temp_sensor)
@@ -377,8 +338,6 @@ static int omap_temp_sensor_enable(struct omap_temp_sensor *temp_sensor)
 
 	udelay(5);	/* wait for 5 us */
 
-        /* Perform a single read just before enabling continuous */
-	//omap_force_single_read(temp_sensor);
 	omap_enable_continuous_mode(temp_sensor);
 
 	temp_sensor->clk_on = 1;
@@ -549,8 +508,6 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 
 	dev_info(dev, "%s probed", pdata->name);
 
-	temp_sensor_pm = temp_sensor;
-
 	return 0;
 
 sysfs_create_err:
@@ -615,34 +572,11 @@ omap_temp_sensor_resume NULL
 
 #endif /* CONFIG_SUSPEND */
 
-static void omap_temp_sensor_save_ctxt(struct omap_temp_sensor *temp_sensor)
-{
-	temp_sensor_context.temp_sensor_ctrl =
-	    omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
-}
-
-static void omap_temp_sensor_restore_ctxt(struct omap_temp_sensor *temp_sensor)
-{
-	omap_temp_sensor_writel(temp_sensor,
-				temp_sensor_context.temp_sensor_ctrl,
-				TEMP_SENSOR_CTRL_OFFSET);
-}
-
-static int omap_temp_sensor_runtime_suspend(struct device *dev)
-{
-	return 0;
-}
-
-static int omap_temp_sensor_runtime_resume(struct device *dev)
-{
-	return 0;
-}
-
 static const struct dev_pm_ops omap_temp_sensor_dev_pm_ops = {
 	.suspend = omap_temp_sensor_suspend,
 	.resume = omap_temp_sensor_resume,
-	.runtime_suspend = omap_temp_sensor_runtime_suspend,
-	.runtime_resume = omap_temp_sensor_runtime_resume,
+	.runtime_suspend = NULL,
+	.runtime_resume = NULL,
 };
 
 static struct platform_driver omap_temp_sensor_driver = {
@@ -747,8 +681,6 @@ int __init omap_temp_sensor_init(void)
 	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_thermal_throttle, omap_thermal_throttle_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_thermal_unthrottle, omap_thermal_unthrottle_s);
-	/* arch/arm/plat-omap/omap-pm-interface.c */
-	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_pm_was_context_lost, omap_pm_was_context_lost_s);
 	/* arch/arm/plat-omap/omap_device.c */
 	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_device_build, omap_device_build_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_device_enable_hwmods, omap_device_enable_hwmods_s);

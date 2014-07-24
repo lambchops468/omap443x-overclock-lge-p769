@@ -408,10 +408,10 @@ static ssize_t omap_throttle_temp_store(struct device *dev,
 	cancel_delayed_work_sync(&temp_sensor->throttle_work);
 
 	mutex_lock(&temp_sensor->throttle_lock);
+	schedule_throttle_work(temp_sensor, omap_read_current_temp(temp_sensor));
+
 	temp_sensor->throttle_hot = new_hot;
 	temp_sensor->throttle_cold = new_cold;
-
-	schedule_throttle_work(temp_sensor, omap_read_current_temp(temp_sensor));
 	mutex_unlock(&temp_sensor->throttle_lock);
 
 out:

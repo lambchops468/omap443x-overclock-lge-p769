@@ -204,6 +204,7 @@ struct omap_temp_sensor {
 	struct mutex throttle_lock;
 	int throttle_cold;
 	int throttle_hot;
+	u8 throttling;
 	struct delayed_work throttle_work;
 };
 
@@ -370,10 +371,11 @@ static ssize_t omap_temp_show_current(struct device *dev,
 static ssize_t omap_throttle_store(struct device *dev,
 	struct device_attribute *devattr, const char *buf, size_t count)
 {
-	if (count && buf[0] == '1')
+	if (count && buf[0] == '1') {
 		omap_thermal_throttle_s();
-	else
+	} else {
 		omap_thermal_unthrottle_s();
+	}
 
 	return count;
 }
@@ -561,10 +563,12 @@ static void throttle_delayed_work_fn(struct work_struct *work)
 	if (curr >= temp_sensor->throttle_hot || curr < 0) {
 		pr_warn("%s: OMAP temp read %d exceeds hot threshold, throttling\n",
 			__func__, curr);
+		temp_sensor->throttling = 1;
 		omap_thermal_throttle_s();
-	} else if (curr < temp_sensor->throttle_cold) {
+	} else if (curr < temp_sensor->throttle_cold && temp_sensor->throttling) {
 		pr_info("%s: OMAP temp read %d below cold threshold, unthrottling\n",
 			__func__, curr);
+		temp_sensor->throttling = 0;
 		omap_thermal_unthrottle_s();
 	}
 	schedule_throttle_work(temp_sensor, curr);

@@ -104,6 +104,10 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_enable_hwmods_s,
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_idle_hwmods_s,
 	struct omap_device *od);
 
+static void throttle_delayed_work_fn(struct work_struct *work);
+
+#define THROTTLE_COLD		88000	/* 85 deg C */
+#define THROTTLE_HOT		90000	/* 90 deg C */
 
 
 /**
@@ -170,6 +174,9 @@ struct omap_temp_sensor {
 	u8 clk_on;
 	unsigned long clk_rate;
 	u32 current_temp;
+	int throttle_cold;
+	int throttle_hot;
+	struct delayed_work throttle_work;
 };
 
 /*
@@ -413,6 +420,54 @@ out:
 	return ret;
 }
 
+/**
+ * Schedule the next temperature check - if it is hot, check the temperature
+ * sooner. This allows us to decide if we need to unthrottle()/throttle(),
+ * benefiting both the health of the chip and performance.
+ */
+static bool schedule_throttle_work(struct omap_temp_sensor *temp_sensor,
+		int curr_temp)
+{
+	int delay_ms;
+	if (curr_temp >= temp_sensor->throttle_cold) {
+		delay_ms = 1000;
+	} else if (curr_temp > temp_sensor->throttle_cold - 6000) {
+		delay_ms = 5000;
+	} else {
+		delay_ms = 30000;
+	}
+	return schedule_delayed_work(&temp_sensor->throttle_work,
+			msecs_to_jiffies(delay_ms));
+}
+
+/*
+ * Check if the die sensor is cooling down. If it's higher than
+ * t_hot since the last throttle then throttle it again.
+ * OMAP junction temperature could stay for a long time in an
+ * unacceptable temperature range. The idea here is to check after
+ * t_hot->throttle the system really came below t_hot else re-throttle
+ * and keep doing till it's under t_hot temp range.
+ */
+static void throttle_delayed_work_fn(struct work_struct *work)
+{
+	int curr;
+	struct omap_temp_sensor *temp_sensor =
+				container_of(work, struct omap_temp_sensor,
+					     throttle_work.work);
+	curr = omap_read_current_temp(temp_sensor);
+
+	if (curr >= temp_sensor->throttle_hot || curr < 0) {
+		pr_warn("%s: OMAP temp read %d exceeds hot threshold, throttling\n",
+			__func__, curr);
+		omap_thermal_throttle_s();
+	} else if (curr < temp_sensor->throttle_cold) {
+		pr_info("%s: OMAP temp read %d below cold threshold, unthrottling\n",
+			__func__, curr);
+		omap_thermal_unthrottle_s();
+	}
+	schedule_throttle_work(temp_sensor, curr);
+}
+
 static irqreturn_t omap_tshut_irq_handler(int irq, void *data)
 {
 	struct omap_temp_sensor *temp_sensor = (struct omap_temp_sensor *)data;
@@ -446,7 +501,7 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	struct omap_temp_sensor_pdata *pdata = pdev->dev.platform_data;
 	struct omap_temp_sensor *temp_sensor;
 	struct resource *mem;
-	int ret = 0;
+	int ret = 0, curr;
 
 	if (!pdata) {
 		dev_err(dev, "%s: platform data missing\n", __func__);
@@ -505,6 +560,10 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 		goto clk_get_err;
 	}
 
+	/* Init delayed work for throttle decision */
+	INIT_DELAYED_WORK(&temp_sensor->throttle_work,
+			  throttle_delayed_work_fn);
+
 	platform_set_drvdata(pdev, temp_sensor);
 
 	ret = omap_temp_sensor_enable(temp_sensor);
@@ -518,7 +577,7 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	mdelay(2);
 
 	/* Read the temperature once due to hw issue*/
-	omap_read_current_temp(temp_sensor);
+	curr = omap_read_current_temp(temp_sensor);
 
 	if (temp_sensor->tshut_irq > 0) {
 		ret = request_threaded_irq(temp_sensor->tshut_irq, NULL,
@@ -531,6 +590,10 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 		}
 	}
 
+	temp_sensor->throttle_cold = THROTTLE_COLD;
+	temp_sensor->throttle_hot = THROTTLE_HOT;
+	schedule_throttle_work(temp_sensor, curr);
+
 	ret = sysfs_create_group(&pdev->dev.kobj, &omap_temp_sensor_group);
 	if (ret) {
 		dev_err(&pdev->dev, "could not create sysfs files\n");
@@ -542,6 +605,7 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	return 0;
 
 sysfs_create_err:
+	cancel_delayed_work_sync(&temp_sensor->throttle_work);
 	if (temp_sensor->tshut_irq > 0)
 		free_irq(temp_sensor->tshut_irq, temp_sensor);
 tshut_irq_req_err:
@@ -564,6 +628,7 @@ static int __devexit omap_temp_sensor_remove(struct platform_device *pdev)
 	struct omap_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
 
 	sysfs_remove_group(&pdev->dev.kobj, &omap_temp_sensor_group);
+	cancel_delayed_work_sync(&temp_sensor->throttle_work);
 	omap_temp_sensor_disable(temp_sensor);
 	clk_put(temp_sensor->clock);
 	platform_set_drvdata(pdev, NULL);

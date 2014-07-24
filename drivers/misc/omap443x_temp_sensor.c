@@ -385,7 +385,7 @@ static ssize_t omap_throttle_temp_store(struct device *dev,
 	struct platform_device *pdev = to_platform_device(dev);
 	struct omap_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
 
-	int ret = count, new_cold, new_hot;
+	int ret = count, new_cold, new_hot, new_cold_adc, new_hot_adc;
 
 	if (sscanf(buf, "%d %d", &new_cold, &new_hot) < 2) {
 		pr_err("%s:Two temperatures could not be read\n", __func__);
@@ -395,15 +395,26 @@ static ssize_t omap_throttle_temp_store(struct device *dev,
 		pr_err("%s:Cold temperature is not less than hot temperature\n", __func__);
 		ret = -EINVAL;
 		goto out;
-	} else if (temp_to_adc_conversion(new_cold) < 0) {
+	} else if ((new_cold_adc = temp_to_adc_conversion(new_cold)) < 0) {
 		pr_err("%s:Cold temperature is out of range\n", __func__);
 		ret = -EINVAL;
 		goto out;
-	} else if (temp_to_adc_conversion(new_hot) < 0) {
+	} else if ((new_hot_adc = temp_to_adc_conversion(new_hot)) < 0) {
 		pr_err("%s:Hot temperature is out of range\n", __func__);
 		ret = -EINVAL;
 		goto out;
+	} else if (!(new_cold_adc < new_hot_adc)) {
+		pr_err("%s:The temperature sensor cannot represent the"
+			"difference between the hot and cold temperatures."
+			"Try a larger difference\n" , __func__);
+		ret = -EINVAL;
+		goto out;
 	}
+
+	/* Store temperatures in temperatures which can be represented so
+	 * reading the throttle_temp file provides the actual thresholds */
+	new_cold = adc_to_temp_conversion(new_cold_adc);
+	new_hot = adc_to_temp_conversion(new_hot_adc);
 
 	cancel_delayed_work_sync(&temp_sensor->throttle_work);
 

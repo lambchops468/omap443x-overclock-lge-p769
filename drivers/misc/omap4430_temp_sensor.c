@@ -273,7 +273,7 @@ static void omap_enable_continuous_mode(struct omap_temp_sensor *temp_sensor)
 
 	/* Enable continuous mode */
 	val = omap_temp_sensor_readl(temp_sensor, TEMP_SENSOR_CTRL_OFFSET);
-	val = val | OMAP4430_SINGLE_MODE_MASK;
+	val |= OMAP4430_SINGLE_MODE_MASK;
 	omap_temp_sensor_writel(temp_sensor, val, TEMP_SENSOR_CTRL_OFFSET);
 
 	/* Start ADC conversion */
@@ -379,7 +379,7 @@ static int omap_temp_sensor_enable(struct omap_temp_sensor *temp_sensor)
 	temp_sensor->clk_on = 1;
 
 out:
-spin_unlock_irqrestore(&temp_sensor->lock, flags);
+	spin_unlock_irqrestore(&temp_sensor->lock, flags);
 	return ret;
 }
 
@@ -452,8 +452,6 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	struct omap_temp_sensor *temp_sensor;
 	struct resource *mem;
 	int ret = 0;
-
-	dev_info(dev, "%s starting probing", pdata->name);
 
 	if (!pdata) {
 		dev_err(dev, "%s: platform data missing\n", __func__);
@@ -585,7 +583,33 @@ static int __devexit omap_temp_sensor_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
+#ifdef CONFIG_SUSPEND
+static int omap_temp_sensor_suspend(struct device *dev)
+{
+	struct omap_temp_sensor *temp_sensor =
+			platform_get_drvdata(to_platform_device(dev));
+
+	omap_temp_sensor_disable(temp_sensor);
+
+	return 0;
+}
+
+static int omap_temp_sensor_resume(struct device *dev)
+{
+	struct omap_temp_sensor *temp_sensor =
+			platform_get_drvdata(to_platform_device(dev));
+
+	omap_temp_sensor_enable(temp_sensor);
+
+	return 0;
+}
+
+#else
+omap_temp_sensor_suspend NULL
+omap_temp_sensor_resume NULL
+
+#endif /* CONFIG_SUSPEND */
+
 static void omap_temp_sensor_save_ctxt(struct omap_temp_sensor *temp_sensor)
 {
 	temp_sensor_context.temp_sensor_ctrl =
@@ -599,51 +623,19 @@ static void omap_temp_sensor_restore_ctxt(struct omap_temp_sensor *temp_sensor)
 				TEMP_SENSOR_CTRL_OFFSET);
 }
 
-static int omap_temp_sensor_suspend(struct platform_device *pdev,
-				    pm_message_t state)
-{
-	struct omap_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
-
-	omap_temp_sensor_disable(temp_sensor);
-
-	return 0;
-}
-
-static int omap_temp_sensor_resume(struct platform_device *pdev)
-{
-	struct omap_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
-
-	omap_temp_sensor_enable(temp_sensor);
-
-	return 0;
-}
-
-#else
-omap_temp_sensor_suspend NULL
-omap_temp_sensor_resume NULL
-
-#endif /* CONFIG_PM */
-
 static int omap_temp_sensor_runtime_suspend(struct device *dev)
 {
-	struct omap_temp_sensor *temp_sensor =
-			platform_get_drvdata(to_platform_device(dev));
-
-	omap_temp_sensor_save_ctxt(temp_sensor);
 	return 0;
 }
 
 static int omap_temp_sensor_runtime_resume(struct device *dev)
 {
-	struct omap_temp_sensor *temp_sensor =
-			platform_get_drvdata(to_platform_device(dev));
-	if (omap_pm_was_context_lost_s(dev)) {
-		omap_temp_sensor_restore_ctxt(temp_sensor);
-	}
 	return 0;
 }
 
 static const struct dev_pm_ops omap_temp_sensor_dev_pm_ops = {
+	.suspend = omap_temp_sensor_suspend,
+	.resume = omap_temp_sensor_resume,
 	.runtime_suspend = omap_temp_sensor_runtime_suspend,
 	.runtime_resume = omap_temp_sensor_runtime_resume,
 };
@@ -651,8 +643,6 @@ static const struct dev_pm_ops omap_temp_sensor_dev_pm_ops = {
 static struct platform_driver omap_temp_sensor_driver = {
 	.probe = omap_temp_sensor_probe,
 	.remove = omap_temp_sensor_remove,
-	.suspend = omap_temp_sensor_suspend,
-	.resume = omap_temp_sensor_resume,
 	.driver = {
 		.name = DRIVER_NAME,
 		.pm = &omap_temp_sensor_dev_pm_ops,

@@ -155,13 +155,16 @@ static void throttle_delayed_work_fn(struct work_struct *work);
  * @pdev - Platform device pointer
  * @dev - device pointer
  * @clock - Clock pointer
- * @sensor_mutex - Mutex for sysfs, irq and PM
- * @irq - MPU Irq number for thermal alertemp_sensor
+ * @lock - Lock for enable/disabling of sensor
  * @tshut_irq -  Thermal shutdown IRQ
  * @phy_base - Physical base of the temp I/O
  * @is_efuse_valid - Flag to determine if eFuse is valid or not
  * @clk_on - Manages the current clock state
  * @clk_rate - Holds current clock rate
+ * @throttle_lock - Locking for throttling
+ * @throttle_cold - The cold throttle threshold
+ * @throttle_hot - The hot throttle threshold
+ * @throttle_work - The work struct for throttling
  */
 struct omap_temp_sensor {
 	struct platform_device *pdev;
@@ -173,7 +176,7 @@ struct omap_temp_sensor {
 	int is_efuse_valid;
 	u8 clk_on;
 	unsigned long clk_rate;
-	u32 current_temp;
+	struct mutex throttle_lock;
 	int throttle_cold;
 	int throttle_hot;
 	struct delayed_work throttle_work;
@@ -222,6 +225,9 @@ static int adc_to_temp_conversion(int adc_val)
 static int temp_to_adc_conversion(long temp)
 {
 	int i;
+
+	if (temp < omap4430_adc_to_temp[0])
+		return -EINVAL;
 
 	for (i = 1; i <= OMAP4430_ADC_END_VALUE - OMAP4430_ADC_START_VALUE; i++)
 		if (temp < omap4430_adc_to_temp[i])
@@ -302,6 +308,27 @@ static void omap_enable_continuous_mode(struct omap_temp_sensor *temp_sensor)
 	/* DTEMP will be updated in <= 36 cycles */
 }
 
+/**
+ * Schedule the next temperature check - if it is hot, check the temperature
+ * sooner. This allows us to decide if we need to unthrottle()/throttle(),
+ * benefiting both the health of the chip and performance.
+ */
+static bool schedule_throttle_work(struct omap_temp_sensor *temp_sensor,
+		int curr_temp)
+{
+	int delay_ms;
+	if (curr_temp >= temp_sensor->throttle_cold) {
+		delay_ms = 1000;
+	} else if (curr_temp > temp_sensor->throttle_cold - 6000) {
+		delay_ms = 5000;
+	} else {
+		delay_ms = 30000;
+	}
+	return queue_delayed_work(system_freezable_wq,
+			&temp_sensor->throttle_work,
+			msecs_to_jiffies(delay_ms));
+}
+
 /*
  * sysfs hook functions
  */
@@ -312,7 +339,7 @@ static ssize_t omap_temp_show_current(struct device *dev,
 	struct platform_device *pdev = to_platform_device(dev);
 	struct omap_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
 
-	return sprintf(buf, "%d\n", omap_read_current_temp(temp_sensor));
+	return scnprintf(buf, PAGE_SIZE, "%d\n", omap_read_current_temp(temp_sensor));
 }
 
 static ssize_t omap_throttle_store(struct device *dev,
@@ -326,11 +353,69 @@ static ssize_t omap_throttle_store(struct device *dev,
 	return count;
 }
 
+static ssize_t omap_throttle_temp_store(struct device *dev,
+				struct device_attribute *devattr,
+				const char *buf, size_t count)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct omap_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
+
+	int ret = count, new_cold, new_hot;
+
+	if (sscanf(buf, "%d %d", &new_cold, &new_hot) < 2) {
+		pr_err("%s:Two temperatures could not be read\n", __func__);
+		ret = -EINVAL;
+		goto out;
+	} else if (!(new_cold < new_hot)) {
+		pr_err("%s:Cold temperature is not less than hot temperature\n", __func__);
+		ret = -EINVAL;
+		goto out;
+	} else if (temp_to_adc_conversion(new_cold) < 0) {
+		pr_err("%s:Cold temperature is out of range\n", __func__);
+		ret = -EINVAL;
+		goto out;
+	} else if (temp_to_adc_conversion(new_hot) < 0) {
+		pr_err("%s:Hot temperature is out of range\n", __func__);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	cancel_delayed_work_sync(&temp_sensor->throttle_work);
+
+	mutex_lock(&temp_sensor->throttle_lock);
+	temp_sensor->throttle_hot = new_hot;
+	temp_sensor->throttle_cold = new_cold;
+
+	schedule_throttle_work(temp_sensor, omap_read_current_temp(temp_sensor));
+	mutex_unlock(&temp_sensor->throttle_lock);
+
+out:
+	return ret;
+}
+
+static ssize_t omap_throttle_temp_show(struct device *dev,
+				struct device_attribute *devattr,
+				char *buf)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct omap_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
+	ssize_t bytes;
+
+	mutex_lock(&temp_sensor->throttle_lock);
+	bytes = scnprintf(buf, PAGE_SIZE, "%d %d\n", temp_sensor->throttle_cold,
+			temp_sensor->throttle_hot);
+	mutex_unlock(&temp_sensor->throttle_lock);
+
+	return bytes;
+}
+
 static DEVICE_ATTR(temperature, S_IRUGO, omap_temp_show_current, NULL);
 static DEVICE_ATTR(throttle, S_IWUSR, NULL, omap_throttle_store);
+static DEVICE_ATTR(throttle_temp, S_IWUSR | S_IRUGO, omap_throttle_temp_show, omap_throttle_temp_store);
 static struct attribute *omap_temp_sensor_attributes[] = {
 	&dev_attr_temperature.attr,
 	&dev_attr_throttle.attr,
+	&dev_attr_throttle_temp.attr,
 	NULL
 };
 
@@ -420,27 +505,6 @@ out:
 	return ret;
 }
 
-/**
- * Schedule the next temperature check - if it is hot, check the temperature
- * sooner. This allows us to decide if we need to unthrottle()/throttle(),
- * benefiting both the health of the chip and performance.
- */
-static bool schedule_throttle_work(struct omap_temp_sensor *temp_sensor,
-		int curr_temp)
-{
-	int delay_ms;
-	if (curr_temp >= temp_sensor->throttle_cold) {
-		delay_ms = 1000;
-	} else if (curr_temp > temp_sensor->throttle_cold - 6000) {
-		delay_ms = 5000;
-	} else {
-		delay_ms = 30000;
-	}
-	return queue_delayed_work(&system_freezable_wq,
-			&temp_sensor->throttle_work,
-			msecs_to_jiffies(delay_ms));
-}
-
 /*
  * Check if the die sensor is cooling down. If it's higher than
  * t_hot since the last throttle then throttle it again.
@@ -457,6 +521,7 @@ static void throttle_delayed_work_fn(struct work_struct *work)
 					     throttle_work.work);
 	curr = omap_read_current_temp(temp_sensor);
 
+	mutex_lock(&temp_sensor->throttle_lock);
 	if (curr >= temp_sensor->throttle_hot || curr < 0) {
 		pr_warn("%s: OMAP temp read %d exceeds hot threshold, throttling\n",
 			__func__, curr);
@@ -467,6 +532,7 @@ static void throttle_delayed_work_fn(struct work_struct *work)
 		omap_thermal_unthrottle_s();
 	}
 	schedule_throttle_work(temp_sensor, curr);
+	mutex_unlock(&temp_sensor->throttle_lock);
 }
 
 static irqreturn_t omap_tshut_irq_handler(int irq, void *data)
@@ -591,6 +657,7 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 		}
 	}
 
+	mutex_init(&temp_sensor->throttle_lock);
 	temp_sensor->throttle_cold = THROTTLE_COLD;
 	temp_sensor->throttle_hot = THROTTLE_HOT;
 	schedule_throttle_work(temp_sensor, curr);

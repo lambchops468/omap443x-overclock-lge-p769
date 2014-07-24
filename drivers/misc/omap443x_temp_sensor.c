@@ -436,7 +436,8 @@ static bool schedule_throttle_work(struct omap_temp_sensor *temp_sensor,
 	} else {
 		delay_ms = 30000;
 	}
-	return schedule_delayed_work(&temp_sensor->throttle_work,
+	return queue_delayed_work(&system_freezable_wq,
+			&temp_sensor->throttle_work,
 			msecs_to_jiffies(delay_ms));
 }
 

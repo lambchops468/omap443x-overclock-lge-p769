@@ -131,8 +131,18 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_idle_hwmods_s,
 
 static void throttle_delayed_work_fn(struct work_struct *work);
 
-#define THROTTLE_COLD		88000	/* 85 deg C */
-#define THROTTLE_HOT		90000	/* 90 deg C */
+/**
+ * The OMAP4430 Data Manual says the maximum average temperature of the chip
+ * should not exceed 110 deg C and the absolute maximum is 125 deg C.
+ *
+ * Ensure that the temperatures selected are present in the adc_to_temp table.
+ */
+#define THROTTLE_COLD		95000	/* 95 deg C */
+#define THROTTLE_HOT		97000	/* 97 deg C */
+#define	THROTTLE_DELAY_HOT	3000	/* 3 seconds */
+#define	THROTTLE_DELAY_WARM	10000	/* 10 seconds */
+#define THROTTLE_WARM_OFFSET	6000	/* 6 deg C */
+#define	THROTTLE_DELAY_COLD	60000	/* 10 seconds */
 
 
 /**
@@ -344,11 +354,11 @@ static bool schedule_throttle_work(struct omap_temp_sensor *temp_sensor,
 {
 	int delay_ms;
 	if (curr_temp >= temp_sensor->throttle_cold) {
-		delay_ms = 3000;
-	} else if (curr_temp > temp_sensor->throttle_cold - 6000) {
-		delay_ms = 10000;
+		delay_ms = THROTTLE_DELAY_HOT;
+	} else if (curr_temp > temp_sensor->throttle_cold - THROTTLE_WARM_OFFSET) {
+		delay_ms = THROTTLE_DELAY_WARM;
 	} else {
-		delay_ms = 60000;
+		delay_ms = THROTTLE_DELAY_COLD;
 	}
 	return queue_delayed_work(system_freezable_wq,
 			&temp_sensor->throttle_work,
@@ -565,7 +575,7 @@ static void throttle_delayed_work_fn(struct work_struct *work)
 			__func__, curr);
 		temp_sensor->throttling = 1;
 		omap_thermal_throttle_s();
-	} else if (curr < temp_sensor->throttle_cold && temp_sensor->throttling) {
+	} else if (curr <= temp_sensor->throttle_cold && temp_sensor->throttling) {
 		pr_info("%s: OMAP temp read %d below cold threshold, unthrottling\n",
 			__func__, curr);
 		temp_sensor->throttling = 0;

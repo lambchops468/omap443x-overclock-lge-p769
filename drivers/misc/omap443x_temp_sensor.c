@@ -722,7 +722,6 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 		temp_sensor->throttle_cold = THROTTLE_COLD;
 		temp_sensor->throttle_hot = THROTTLE_HOT;
 		schedule_throttle_work(temp_sensor, curr);
-	} else {
 		/* Disable the sysfs throttle threshold control file */
 		omap_temp_sensor_attributes[THROTTLE_TEMP_ATTR_INDEX] =
 			&dev_attr_throttle_temp.attr;

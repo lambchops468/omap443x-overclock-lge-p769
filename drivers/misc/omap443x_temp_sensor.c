@@ -28,6 +28,10 @@
  * $ echo 0 >  /sys/devices/platform/omap/omap_temp_sensor.0/throttle
  * This resets the frequency table to its default (all frequencies available)
  *
+ * Automatic throttling can be disabled by loading the module with
+ * throttle_enable = 0:
+ * $ insmod omap443x_temp_sensor.ko throttle_enable=0
+ *
  * To check the automatic throttling temperature limits:
  * $ cat /sys/devices/platform/omap/omap_temp_sensor.0/throttle_temp
  * This prints the cold throttle threshold in milliCelcius, a space, and the
@@ -128,6 +132,9 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_enable_hwmods_s,
 	struct omap_device *od);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_idle_hwmods_s,
 	struct omap_device *od);
+
+static bool throttle_enable = true;
+module_param(throttle_enable, bool, S_IRUGO);
 
 static void throttle_delayed_work_fn(struct work_struct *work);
 
@@ -460,10 +467,11 @@ static ssize_t omap_throttle_temp_show(struct device *dev,
 static DEVICE_ATTR(temperature, S_IRUGO, omap_temp_show_current, NULL);
 static DEVICE_ATTR(throttle, S_IWUSR, NULL, omap_throttle_store);
 static DEVICE_ATTR(throttle_temp, S_IWUSR | S_IRUGO, omap_throttle_temp_show, omap_throttle_temp_store);
+#define THROTTLE_TEMP_ATTR_INDEX 2
 static struct attribute *omap_temp_sensor_attributes[] = {
 	&dev_attr_temperature.attr,
 	&dev_attr_throttle.attr,
-	&dev_attr_throttle_temp.attr,
+	NULL, /* Set to &dev_attr_throttle_temp.attr if throttling enabled */
 	NULL
 };
 
@@ -570,7 +578,9 @@ static void throttle_delayed_work_fn(struct work_struct *work)
 	curr = omap_read_current_temp(temp_sensor);
 
 	mutex_lock(&temp_sensor->throttle_lock);
-	if (curr >= temp_sensor->throttle_hot || curr < 0) {
+	if ((curr >= temp_sensor->throttle_hot && temp_sensor->throttling == 0) ||
+	    (curr > temp_sensor->throttle_hot && temp_sensor->throttling == 1) ||
+	    curr < 0) {
 		pr_warn("%s: OMAP temp read %d exceeds hot threshold, throttling\n",
 			__func__, curr);
 		temp_sensor->throttling = 1;
@@ -661,7 +671,7 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	pm_runtime_enable(dev);
 	pm_runtime_irq_safe(dev);
 
-	/*
+	/**
 	 * check if the efuse has a non-zero value if not
 	 * it is an untrimmed sample and the temperatures
 	 * may not be accurate */
@@ -676,10 +686,6 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 		ret = -EINVAL;
 		goto clk_get_err;
 	}
-
-	/* Init delayed work for throttle decision */
-	INIT_DELAYED_WORK(&temp_sensor->throttle_work,
-			  throttle_delayed_work_fn);
 
 	platform_set_drvdata(pdev, temp_sensor);
 
@@ -708,9 +714,19 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	}
 
 	mutex_init(&temp_sensor->throttle_lock);
-	temp_sensor->throttle_cold = THROTTLE_COLD;
-	temp_sensor->throttle_hot = THROTTLE_HOT;
-	schedule_throttle_work(temp_sensor, curr);
+
+	INIT_DELAYED_WORK(&temp_sensor->throttle_work,
+			throttle_delayed_work_fn);
+
+	if (throttle_enable) {
+		temp_sensor->throttle_cold = THROTTLE_COLD;
+		temp_sensor->throttle_hot = THROTTLE_HOT;
+		schedule_throttle_work(temp_sensor, curr);
+	} else {
+		/* Disable the sysfs throttle threshold control file */
+		omap_temp_sensor_attributes[THROTTLE_TEMP_ATTR_INDEX] =
+			&dev_attr_throttle_temp.attr;
+	}
 
 	ret = sysfs_create_group(&pdev->dev.kobj, &omap_temp_sensor_group);
 	if (ret) {

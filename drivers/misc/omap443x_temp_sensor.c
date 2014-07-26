@@ -45,14 +45,14 @@
  * threshold, omap_thermal_throttle() will disable the highest enabled
  * frequency. The next temperature check in this case occurs in 3 second. If the
  * temperature is still above the hot threshold, then the next highest frequency
- * is also disabled. The next temperature check occurs in 3 second.
+ * is also disabled. The next temperature check occurs in 1 second.
  *
  * When the temperature check is below the cold threshold, then
  * omap_thermal_unthrottle() will enable all frequencies. The next temperature
- * check will occur in 10 seconds.
+ * check will occur in 5 seconds.
  *
  * If the current temperature during the check is 6 degrees below the cold
- * threshold, then the next check will occur in 60 seconds.
+ * threshold, then the next check will occur in 20 seconds.
  *
  * This driver is extensively modified from omap_temp_sensor, written by:
  * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
@@ -146,10 +146,10 @@ static void throttle_delayed_work_fn(struct work_struct *work);
  */
 #define THROTTLE_COLD		95000	/* 95 deg C */
 #define THROTTLE_HOT		97000	/* 97 deg C */
-#define	THROTTLE_DELAY_HOT	3000	/* 3 seconds */
-#define	THROTTLE_DELAY_WARM	10000	/* 10 seconds */
+#define	THROTTLE_DELAY_HOT	1000	/* 1 second */
+#define	THROTTLE_DELAY_WARM	5000	/* 5 seconds */
 #define THROTTLE_WARM_OFFSET	6000	/* 6 deg C */
-#define	THROTTLE_DELAY_COLD	60000	/* 10 seconds */
+#define	THROTTLE_DELAY_COLD	20000	/* 20 seconds */
 
 
 /**

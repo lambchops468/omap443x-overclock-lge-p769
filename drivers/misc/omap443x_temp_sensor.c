@@ -19,19 +19,6 @@
  * To read the temperature of the CPU:
  * $ cat /sys/devices/platform/omap/omap_temp_sensor.0/temperature
  *
- * To throttle the CPU from userspace:
- * $ echo 1 >  /sys/devices/platform/omap/omap_temp_sensor.0/throttle
- * Each time "1" is written to tthe throttle file, the CPU frequency governor
- * will remove the next highest frequency from the frequency table.
- *
- * To unthrottle the CPU from userspace:
- * $ echo 0 >  /sys/devices/platform/omap/omap_temp_sensor.0/throttle
- * This resets the frequency table to its default (all frequencies available)
- *
- * Automatic throttling can be disabled by loading the module with
- * throttle_enable = 0:
- * $ insmod omap443x_temp_sensor.ko throttle_enable=0
- *
  * To check the automatic throttling temperature limits:
  * $ cat /sys/devices/platform/omap/omap_temp_sensor.0/throttle_temp
  * This prints the cold throttle threshold in milliCelcius, a space, and the
@@ -53,6 +40,20 @@
  *
  * If the current temperature during the check is 6 degrees below the cold
  * threshold, then the next check will occur in 20 seconds.
+ *
+ * Automatic throttling can be disabled by loading the module with
+ * throttle_enable = 0:
+ * $ insmod omap443x_temp_sensor.ko throttle_enable=0
+ * This will cause the manual user-space throttling interface to be exposed:
+ *
+ * To throttle the CPU from userspace:
+ * $ echo 1 >  /sys/devices/platform/omap/omap_temp_sensor.0/throttle
+ * Each time "1" is written to tthe throttle file, the CPU frequency governor
+ * will remove the next highest frequency from the frequency table.
+ *
+ * To unthrottle the CPU from userspace:
+ * $ echo 0 >  /sys/devices/platform/omap/omap_temp_sensor.0/throttle
+ * This resets the frequency table to its default (all frequencies available)
  *
  * This driver is extensively modified from omap_temp_sensor, written by:
  * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
@@ -467,11 +468,10 @@ static ssize_t omap_throttle_temp_show(struct device *dev,
 static DEVICE_ATTR(temperature, S_IRUGO, omap_temp_show_current, NULL);
 static DEVICE_ATTR(throttle, S_IWUSR, NULL, omap_throttle_store);
 static DEVICE_ATTR(throttle_temp, S_IWUSR | S_IRUGO, omap_throttle_temp_show, omap_throttle_temp_store);
-#define THROTTLE_TEMP_ATTR_INDEX 2
+#define THROTTLE_ATTR_INDEX 1
 static struct attribute *omap_temp_sensor_attributes[] = {
 	&dev_attr_temperature.attr,
-	&dev_attr_throttle.attr,
-	NULL, /* Set to &dev_attr_throttle_temp.attr if throttling enabled */
+	NULL,
 	NULL
 };
 
@@ -722,9 +722,13 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 		temp_sensor->throttle_cold = THROTTLE_COLD;
 		temp_sensor->throttle_hot = THROTTLE_HOT;
 		schedule_throttle_work(temp_sensor, curr);
-		/* Disable the sysfs throttle threshold control file */
-		omap_temp_sensor_attributes[THROTTLE_TEMP_ATTR_INDEX] =
+		/* Enable the sysfs throttle threshold control file */
+		omap_temp_sensor_attributes[THROTTLE_ATTR_INDEX] =
 			&dev_attr_throttle_temp.attr;
+	} else {
+		/* Enable the sysfs userspace throttle control file */
+		omap_temp_sensor_attributes[THROTTLE_ATTR_INDEX] =
+			&dev_attr_throttle.attr;
 	}
 
 	ret = sysfs_create_group(&pdev->dev.kobj, &omap_temp_sensor_group);

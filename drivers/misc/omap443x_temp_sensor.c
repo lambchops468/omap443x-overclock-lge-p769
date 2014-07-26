@@ -42,8 +42,8 @@
  * threshold, then the next check will occur in 20 seconds.
  *
  * Automatic throttling can be disabled by loading the module with
- * throttle_enable = 0:
- * $ insmod omap443x_temp_sensor.ko throttle_enable=0
+ * auto_throttle = 0:
+ * $ insmod omap443x_temp_sensor.ko auto_throttle=0
  * This will cause the manual user-space throttling interface to be exposed:
  *
  * To throttle the CPU from userspace:
@@ -134,8 +134,8 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_enable_hwmods_s,
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, omap_device_idle_hwmods_s,
 	struct omap_device *od);
 
-static bool throttle_enable = true;
-module_param(throttle_enable, bool, S_IRUGO);
+static bool auto_throttle = true;
+module_param(auto_throttle, bool, S_IRUGO);
 
 static void throttle_delayed_work_fn(struct work_struct *work);
 
@@ -718,7 +718,7 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&temp_sensor->throttle_work,
 			throttle_delayed_work_fn);
 
-	if (throttle_enable) {
+	if (auto_throttle) {
 		temp_sensor->throttle_cold = THROTTLE_COLD;
 		temp_sensor->throttle_hot = THROTTLE_HOT;
 		schedule_throttle_work(temp_sensor, curr);

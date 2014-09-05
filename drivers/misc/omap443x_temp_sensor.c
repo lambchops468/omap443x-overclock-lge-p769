@@ -30,16 +30,16 @@
  *
  * The throttle algorithm checks the temperature, and if it is above the hot
  * threshold, omap_thermal_throttle() will disable the highest enabled
- * frequency. The next temperature check in this case occurs in 3 second. If the
+ * frequency. The next temperature check in this case occurs in 1 second. If the
  * temperature is still above the hot threshold, then the next highest frequency
  * is also disabled. The next temperature check occurs in 1 second.
  *
  * When the temperature check is below the cold threshold, then
- * omap_thermal_unthrottle() will enable all frequencies. The next temperature
- * check will occur in 5 seconds.
+ * omap_thermal_unthrottle_step() will enable the next faster frequency. The
+ * next temperature check will occur in 1 second.
  *
- * If the current temperature during the check is 6 degrees below the cold
- * threshold, then the next check will occur in 20 seconds.
+ * If the current temperature during the check is 10 degrees below the cold
+ * threshold, then the next check will occur in 5 seconds.
  *
  * Automatic throttling can be disabled by loading the module with
  * auto_throttle = 0:
@@ -162,9 +162,8 @@ static void throttle_delayed_work_fn(struct work_struct *work);
 #define THROTTLE_COLD		83000	/* 83 deg C */
 #define THROTTLE_HOT		85000	/* 85 deg C */
 #define	THROTTLE_DELAY_HOT	1000	/* 1 second */
-#define	THROTTLE_DELAY_WARM	5000	/* 5 seconds */
-#define THROTTLE_WARM_OFFSET	6000	/* 6 deg C */
-#define	THROTTLE_DELAY_COLD	20000	/* 20 seconds */
+#define THROTTLE_WARM_OFFSET	10000	/* 10 deg C */
+#define	THROTTLE_DELAY_COLD	5000	/* 5 seconds */
 
 
 /**
@@ -378,10 +377,8 @@ static bool schedule_throttle_work(struct omap_temp_sensor *temp_sensor,
 		int curr_temp)
 {
 	int delay_ms;
-	if (curr_temp >= temp_sensor->throttle_cold) {
+	if (curr_temp >= temp_sensor->throttle_cold - THROTTLE_WARM_OFFSET) {
 		delay_ms = THROTTLE_DELAY_HOT;
-	} else if (curr_temp > temp_sensor->throttle_cold - THROTTLE_WARM_OFFSET) {
-		delay_ms = THROTTLE_DELAY_WARM;
 	} else {
 		delay_ms = THROTTLE_DELAY_COLD;
 	}

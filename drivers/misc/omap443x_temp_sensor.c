@@ -426,7 +426,8 @@ static void omap_thermal_unthrottle_step(void)
 
 	*max_thermal_freq_p = omap_thermal_raise_speed();
 
-	pr_warn("%s: temperature reduced, ending cpu throttling\n", __func__);
+	pr_warn("%s: temperature reduced, cpu unthrottling at max %u\n",
+		__func__, *max_thermal_freq_p);
 
 	if (!*omap_cpufreq_suspended_p) {
 		cur = omap_getspeed_s(0);

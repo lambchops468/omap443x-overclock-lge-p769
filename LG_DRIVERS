@@ -1,0 +1,26 @@
+Here is a very incomplete  list of drivers which have been modified by LG:
+
+arch/arm/configs/hdk4460_defconfig
+arch/arm/configs/p2*
+arch/arm/configs/u2*
+arch/arm/mach-omap2/lge/*
+drivers/power/max8971_charger.c
+drivers/power/twl6030_bci_battery_u2.c
+drivers/power/twl6030_bci_battery_ap_fuel.c
+drivers/power/Makefile
+drivers/power/Kconfig
+drivers/power/power_supply_sysfs.c
+drivers/lge/misc/leds-keypad-gpio.c
+drivers/lge/subpmic/lm3530.c
+drivers/lge/subpmic/lm3533.c
+drivers/muic/*
+include/linux/power_supply.h
+include/linux/leds.h
+include/linux/max8971.h
+include/linux/lge/lm3530.h
+include/linux/lge/lm3533.h
+include/linux/muic/muic.h
+
+
+Alternatively, do this:
+grep -r "\(LG Electronics\)\|\(LGE\)" *

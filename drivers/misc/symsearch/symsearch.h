@@ -75,6 +75,14 @@
 		return -EBUSY; \
 	}
 
+#define SYMSEARCH_BIND_POINTER_TO(module, type, name, sym) \
+	sym = (type) lookup_symbol_address(#name); \
+	if(!sym) \
+	{ \
+		printk(KERN_ERR #module ": Could not find symbol: " #name ".\n"); \
+		return -EBUSY; \
+	}
+
 #define SYMSEARCH_BIND_FUNCTION(module,name) \
 	name = (name##_fp)lookup_symbol_address(#name); \
 	if(!name) \

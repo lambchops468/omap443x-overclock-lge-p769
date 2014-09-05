@@ -919,16 +919,8 @@ int __init omap_temp_sensor_init(void)
 	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_device_enable_hwmods, omap_device_enable_hwmods_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_device_idle_hwmods, omap_device_idle_hwmods_s);
         /* arch/arm/mach-omap2/omap_hwmod_44xx_data.c */
-        omap44xx_l4_cfg_hwmod_p = (struct omap_hwmod*) lookup_symbol_address("omap44xx_l4_cfg_hwmod");
-        if (!omap44xx_l4_cfg_hwmod_p) {
-                pr_err("Could not find symbol: omap44xx_l4_cfg_hwmod\n");
-                return -EBUSY;
-        }
-        omap443x_bandgap_hwmod_p = (struct omap_hwmod*) lookup_symbol_address("omap443x_bandgap_hwmod");
-        if (!omap443x_bandgap_hwmod_p) {
-                pr_err("Could not find symbol: omap443x_bandgap_hwmod\n");
-                return -EBUSY;
-        }
+	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct omap_hwmod*, omap44xx_l4_cfg_hwmod, omap44xx_l4_cfg_hwmod_p);
+	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct omap_hwmod*, omap443x_bandgap_hwmod, omap443x_bandgap_hwmod_p);
 
 	omap44xx_l4_cfg__bandgap.master = omap44xx_l4_cfg_hwmod_p;
 	omap44xx_l4_cfg__bandgap.slave = omap443x_bandgap_hwmod_p;

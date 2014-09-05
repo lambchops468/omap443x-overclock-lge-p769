@@ -145,8 +145,8 @@ static void throttle_delayed_work_fn(struct work_struct *work);
  *
  * Ensure that the temperatures selected are present in the adc_to_temp table.
  */
-#define THROTTLE_COLD		95000	/* 95 deg C */
-#define THROTTLE_HOT		97000	/* 97 deg C */
+#define THROTTLE_COLD		83000	/* 83 deg C */
+#define THROTTLE_HOT		85000	/* 85 deg C */
 #define	THROTTLE_DELAY_HOT	1000	/* 1 second */
 #define	THROTTLE_DELAY_WARM	5000	/* 5 seconds */
 #define THROTTLE_WARM_OFFSET	6000	/* 6 deg C */

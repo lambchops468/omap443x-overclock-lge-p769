@@ -11,8 +11,8 @@ How to build:
       repo init -u https://android.googlesource.com/platform/manifest -b android-4.1.2_r1
 1c. Run
       repo sync platform/prebuilt
-2. Run
-      make ARCH=arm CROSS_COMPILE=../prebuilt/linux-x86/toolchain/arm-eabi-4.4.3/bin/arm-eabi- zImage modules
+2. In the kernel directory, Run
+      make -j8 ARCH=arm CROSS_COMPILE=../android-4.1.2r1-prebuilt/prebuilt/linux-x86/toolchain/arm-eabi-4.4.3/bin/arm-eabi- zImage modules
 
 
 The .config located at the root of this repository is based off the config that

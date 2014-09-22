@@ -1,15 +1,13 @@
 /*
- * CPU frequency & voltage control for Motorola 3.0.8 kernel
+ * CPU frequency & voltage control for LG P769
  *
- * Copyright (C) 2012 Project Lense (@whirleyes)
+ * Copyright (C) 2014 Alexander Lam (lambchop468 (at) gmail.com)
  *
  * Based on
- *  - Motorola Milestone overclock module (by Tiago Sousa <mirage@kaotik.org>, modified by nadlabak, Skrilax_CZ)
- *  - opptimizer module by Jeffrey Kawika Patricio <jkp@tekahuna.net>
+ *  - CPU frequency & voltage control for Motorola 3.0.8 kernel by Project Lense
  *	
  * License: GNU GPLv3
  * <http://www.gnu.org/licenses/gpl-3.0.html>
- *
  */
 
 #include <linux/kernel.h>
@@ -21,7 +19,6 @@
 #include <linux/clk.h>
 #include <linux/kallsyms.h>
 #include <linux/mutex.h>
-#include <linux/slab.h>
 #include <linux/proc_fs.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
@@ -32,6 +29,7 @@
 #include "../../../arch/arm/mach-omap2/omap_opp_data.h"
 #include "../../../arch/arm/mach-omap2/voltage.h"
 #include "../symsearch/symsearch.h"
+
 //opp.c
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_add_s, struct device *dev, unsigned long freq, unsigned long u_volt);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_get_opp_count_s, struct device *dev);
@@ -66,15 +64,14 @@ struct opp_table {
 static struct cpufreq_frequency_table *freq_table;
 static struct cpufreq_policy *policy;
 static struct device *mpu_dev, *gpu_dev;
-static struct opp *gpu_opp;
-static struct voltagedomain *voltdm;
-static struct omap_vdd_info *vdd;
+static struct voltagedomain *mpu_voltdm;
+static struct omap_vdd_info *mpu_vdd;
 static struct clk *mpu_clk, *gpu_clk;
-extern struct mutex omap_dvfs_lock;
+//extern struct mutex omap_dvfs_lock;
+//DEFINE_MUTEX(omap_dvfs_lock);
 static struct opp_table *def_ft;
-DEFINE_MUTEX(omap_dvfs_lock);
 
-int opp_count;
+int mpu_opp_count;
 static char def_governor[16];
 static char good_governor[16] = "hotplug";
 
@@ -121,7 +118,7 @@ static int proc_mpu_opp_def(char *buffer, char **buffer_location, off_t offset, 
 		ret = 0;
 	else
 		ret += scnprintf(buffer+ret, count-ret, "Id\tFreq\tVolt(mV)\n");
-		for(i = 0;i <opp_count; i++) {
+		for(i = 0;i <mpu_opp_count; i++) {
 			ret += scnprintf(buffer+ret, count-ret, "%d\t%lu\t%lu\n", def_ft[i].index, def_ft[i].rate/1000000, def_ft[i].u_volt/1000);
 		}
 	return ret;
@@ -134,7 +131,7 @@ static int proc_mpu_opp_cur(char *buffer, char **buffer_location, off_t offset, 
 		ret = 0;
 	else
 		ret += scnprintf(buffer+ret, count-ret, "Id\tFreq\tVolt(mV)\n");
-		for(i = 0;i <opp_count; i++) {
+		for(i = 0;i <mpu_opp_count; i++) {
 			ret += scnprintf(buffer+ret, count-ret, "%d\t%lu\t%lu\n", def_ft[i].index, def_ft[i].opp->rate/1000000, def_ft[i].opp->u_volt/1000);
 		}
 	return ret;
@@ -151,21 +148,21 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 
 	buf[len] = 0;
 	if(sscanf(buf, "%d %d %d", &id, &freq, &volt) == 3) {
-		if ((id > opp_count-1) || (id < 0)) {
+		if ((id > mpu_opp_count-1) || (id < 0)) {
 			pr_err("cpu-control : wrong cpu opp id @ %d", id);
 			return -EFAULT;
 		}
 		//some filter
 		if (volt > OMAP4_VP_MPU_VLIMITTO_VDDMAX/1000) volt = OMAP4_VP_MPU_VLIMITTO_VDDMAX/1000;
 		if (volt < OMAP4_VP_MPU_VLIMITTO_VDDMIN/1000) volt = OMAP4_VP_MPU_VLIMITTO_VDDMIN/1000;
-		if (freq > 2000) freq = def_ft[opp_count-1].rate/1000;
+		if (freq > 2000) freq = def_ft[mpu_opp_count-1].rate/1000;
 		if (freq < 0) freq = def_ft[0].rate/1000;
 
 		pr_info("cpu-control : Change operating point : %d %d Mhz %d mV\n", id, freq, volt);
 
 		policy->min = policy->cpuinfo.min_freq = policy->user_policy.min =
 		policy->max = policy->cpuinfo.max_freq = policy->user_policy.max =
-		def_ft[opp_count-1].rate/1000;
+		def_ft[mpu_opp_count-1].rate/1000;
 
 		pr_info("cpu-control : Current cpufreq gov : %s\n", policy->governor->name);
 		if (policy->governor->name != good_governor) {
@@ -178,12 +175,12 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 		mutex_lock(&omap_dvfs_lock);
 
 		freq_table[id].frequency = freq * 1000;
-		vdd->volt_data[id].volt_nominal = volt * 1000;
-		vdd->dep_vdd_info[0].dep_table[id].main_vdd_volt = volt * 1000;
+		mpu_vdd->volt_data[id].volt_nominal = volt * 1000;
+		mpu_vdd->dep_vdd_info[0].dep_table[id].main_vdd_volt = volt * 1000;
 		def_ft[id].opp->u_volt = volt * 1000;
 		def_ft[id].opp->rate = freq * 1000000;
 
-		voltdm_reset_s(voltdm);
+		voltdm_reset_s(mpu_voltdm);
 		mutex_unlock(&omap_dvfs_lock);
 
 		if (change) {
@@ -200,11 +197,12 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 
 static int __init cpu_control_init(void) {
 	struct proc_dir_entry *proc_entry;
+	struct opp *gpu_opp;
 
 	int i;
 	unsigned long freq = ULONG_MAX;
 
-	pr_info("cpu-control : Hello world! @ cpu_control version : a3\n");
+	pr_info("cpu-control : Hello world!\n");
 	//opp.c
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_add, opp_add_s);
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_enable, opp_enable_s);
@@ -219,30 +217,59 @@ static int __init cpu_control_init(void) {
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, __cpufreq_set_policy, __cpufreq_set_policy_s);
 
 	freq_table = cpufreq_frequency_get_table(0);
-	policy = cpufreq_cpu_get(0);
-	mpu_clk = clk_get(NULL, "dpll_mpu_ck");
-	gpu_clk = clk_get(NULL, "gpu_fck");
+	if (!freq_table) {
+		pr_err("%s:No cpufreq driver\n", __func__);
+		return -EINVAL;
+	}
 
-	voltdm = voltdm_lookup_s("mpu");
-	if (!voltdm || IS_ERR(voltdm)) {
-		pr_err("cpu-control : No voltage domain?\n");
+	policy = cpufreq_cpu_get(0);
+	if (!policy) {
+		pr_err("%s:No cpufreq driver\n", __func__);
+		return -EINVAL;
+	}
+
+	mpu_clk = clk_get(NULL, "dpll_mpu_ck");
+	if (IS_ERR(mpu_clk)) {
+		pr_err("%s:Unable to get mpu_clk\n", __func__);
 		return -ENODEV;
 	}
-	vdd = voltdm->vdd;
+
+	mpu_voltdm = voltdm_lookup_s("mpu");
+	if (!mpu_voltdm || IS_ERR(mpu_voltdm)) {
+		pr_err("cpu-control: %s: Unable to get mpu voltage domain\n", __func__);
+		return -ENODEV;
+	}
+	mpu_vdd = mpu_voltdm->vdd;
 
 	mpu_dev = omap2_get_mpuss_device();
 	if (!mpu_dev || IS_ERR(mpu_dev)) {
+		pr_err("cpu-control: %s: Unable to get mpu device\n", __func__);
 		return -ENODEV;
 	}
-	opp_count = opp_get_opp_count_s(mpu_dev);
+	mpu_opp_count = opp_get_opp_count_s(mpu_dev);
+	if (mpu_opp_count <= 0) {
+		pr_err("cpu-control: %s: Could not get opp count for mpu\n", __func__);
+		return -EINVAL;
+	}
+
+	gpu_clk = clk_get(NULL, "gpu_fck");
+	if (IS_ERR(gpu_clk)) {
+		pr_err("%s:Unable to get gpu_clk\n", __func__);
+		return -ENODEV;
+	}
 
 	gpu_dev = omap_hwmod_name_get_dev("gpu");
 	if (!gpu_dev || IS_ERR(gpu_dev)) {
+		pr_err("cpu-control: %s: Unable to get gpu device\n", __func__);
 		return -ENODEV;
 	}
 
-	def_ft = kzalloc(sizeof(struct opp_table) * (opp_count), GFP_KERNEL);
-	for(i = 0; i<opp_count; i++) {
+	def_ft = kzalloc(sizeof(struct opp_table) * (mpu_opp_count), GFP_KERNEL);
+	if (!def_ft) {
+		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
+		return -ENOMEM;
+	}
+	for(i = 0; i<mpu_opp_count; i++) {
 		def_ft[i].index = i;
 		freq = (freq_table[i].frequency-1000) * 1000;
 		def_ft[i].opp = opp_find_freq_ceil_s(mpu_dev, &freq);
@@ -262,6 +289,10 @@ static int __init cpu_control_init(void) {
 	}
 */
 	buf = (char *)vmalloc(BUF_SIZE);
+	if (!buf) {
+		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
+		return -ENOMEM;
+	}
 
 	proc_mkdir("cpu_control", NULL);
 	proc_entry = create_proc_read_entry("cpu_control/frequency_current", 0444, NULL, proc_gpu_cpu_speed, NULL);
@@ -388,12 +419,12 @@ static void __exit cpu_control_exit(void){
 	mutex_lock(&omap_dvfs_lock);
 	for(i = 0; i<opp_count; i++) {
 		freq_table[i].frequency = def_ft[i].rate/1000;
-		vdd->volt_data[i].volt_nominal = def_ft[i].u_volt;
-		vdd->dep_vdd_info[0].dep_table[i].main_vdd_volt = def_ft[i].u_volt;
+		mpu_vdd->volt_data[i].volt_nominal = def_ft[i].u_volt;
+		mpu_vdd->dep_vdd_info[0].dep_table[i].main_vdd_volt = def_ft[i].u_volt;
 		def_ft[i].opp->u_volt = def_ft[i].u_volt;
 		def_ft[i].opp->rate = def_ft[i].rate;
 	}
-	voltdm_reset_s(voltdm);
+	voltdm_reset_s(mpu_voltdm);
 	mutex_unlock(&omap_dvfs_lock);
 
 	if (change) {
@@ -409,6 +440,6 @@ static void __exit cpu_control_exit(void){
 module_init(cpu_control_init);
 module_exit(cpu_control_exit);
 
-MODULE_AUTHOR("whirleyes");
-MODULE_DESCRIPTION("cpu_control - Tweak cpu/gpu voltage & frequency.\nextra : Moto**** version.");
+MODULE_AUTHOR("Alexander Lam (lambchop468 (at) gmail.com)");
+MODULE_DESCRIPTION("cpu_control - Tweak cpu/gpu voltage & frequency for OMAP443x.");
 MODULE_LICENSE("GPL");

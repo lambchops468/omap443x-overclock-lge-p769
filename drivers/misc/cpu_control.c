@@ -30,16 +30,19 @@
 #include "../../../arch/arm/mach-omap2/voltage.h"
 #include "../symsearch/symsearch.h"
 
-//opp.c
+/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
+static struct mutex *omap_cpufreq_lock_p = NULL;
+
+/* drivers/base/power/opp.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_add_s, struct device *dev, unsigned long freq, unsigned long u_volt);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_get_opp_count_s, struct device *dev);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_enable_s, struct device *dev, unsigned long freq);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct opp *, opp_find_freq_floor_s, struct device *dev, unsigned long *freq);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct opp *, opp_find_freq_ceil_s, struct device *dev, unsigned long *freq);
-//voltage.c
+/* arch/arm/mach-omap2/voltage.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct voltagedomain *, voltdm_lookup_s, char *name);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(void, voltdm_reset_s, struct voltagedomain *voltdm);
-// cpufreq.c
+/* drivers/cpufreq/cpufreq.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct cpufreq_governor *, __find_governor_s, const char *str_governor);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, __cpufreq_set_policy_s, struct cpufreq_policy *data, struct cpufreq_policy *policy);
 
@@ -67,11 +70,10 @@ static struct device *mpu_dev, *gpu_dev;
 static struct voltagedomain *mpu_voltdm;
 static struct omap_vdd_info *mpu_vdd;
 static struct clk *mpu_clk, *gpu_clk;
-//extern struct mutex omap_dvfs_lock;
-//DEFINE_MUTEX(omap_dvfs_lock);
+extern struct mutex omap_dvfs_lock;
 static struct opp_table *def_ft;
 
-int mpu_opp_count;
+static int mpu_opp_count;
 static char def_governor[16];
 static char good_governor[16] = "hotplug";
 
@@ -172,6 +174,7 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 			pr_info("cpu-control : Change cpufreq gov : %s\n", policy->governor->name);
 		}
 
+		mutex_lock(omap_cpufreq_lock_p);
 		mutex_lock(&omap_dvfs_lock);
 
 		freq_table[id].frequency = freq * 1000;
@@ -182,6 +185,7 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 
 		voltdm_reset_s(mpu_voltdm);
 		mutex_unlock(&omap_dvfs_lock);
+		mutex_unlock(omap_cpufreq_lock_p);
 
 		if (change) {
 			set_governor(policy, def_governor);
@@ -195,24 +199,91 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 }
 /* proc fs end */
 
+static int __init populate_def_freq_table() {
+	unsigned long freq;
+	int ret = 0;
+	int i;
+
+	mutex_lock(omap_cpufreq_lock_p);
+	/* half hearted attempt at being 'correct' - the opp interface asks us
+	 * to rcu_read_lock() before using opp_find_*. It also requires that we
+	 * hold the dev_opp_list_lock when modifying the list, and use appropriate
+	 * rcu functions., but this is a moot point because this driver holds
+	 * pointers to struct opp objects.
+	 * This is technically illegal because the opp interface uses RCU, so
+	 * if an object is modified, it is actually a new copy in a new
+	 * location. So... when modifying struct opp objects, don't bother with
+	 * locking at all.
+	 *
+	 * Note that in normal operation, nobody updates the MPU's opp list.
+	 *
+	 * see drivers/base/power/opp.c and Documentation/power/opp.txt for
+	 * more details.
+	 */
+	rcu_read_lock();
+	for(i = 0; i<mpu_opp_count; i++) {
+		def_ft[i].index = i;
+
+		freq = (freq_table[i].frequency-1000) * 1000;
+
+		def_ft[i].opp = opp_find_freq_ceil_s(mpu_dev, &freq);
+		if (IS_ERR(def_ft[i].opp)) {
+			pr_err("cpu-control: %s: Unable to retrieve OPP\n", __func__);
+			ret = -EINVAL;
+			goto out;
+		}
+		
+		def_ft[i].rate = def_ft[i].opp->rate;
+		def_ft[i].u_volt = def_ft[i].opp->u_volt;
+
+		pr_info("Map %d : %lu Mhz : %lu mV\n", def_ft[i].index,
+				def_ft[i].rate/1000000, def_ft[i].u_volt/1000);
+	}
+out:
+	rcu_read_unlock();
+	mutex_unlock(omap_cpufreq_lock_p);
+
+	return ret;
+}
+
+static int __exit restore_def_freq_table() {
+	mutex_lock(omap_cpufreq_lock_p);
+	mutex_lock(&omap_dvfs_lock);
+	for(i = 0; i<opp_count; i++) {
+		freq_table[i].frequency = def_ft[i].rate/1000;
+		mpu_vdd->volt_data[i].volt_nominal = def_ft[i].u_volt;
+		mpu_vdd->dep_vdd_info[0].dep_table[i].main_vdd_volt = def_ft[i].u_volt;
+		def_ft[i].opp->u_volt = def_ft[i].u_volt;
+		def_ft[i].opp->rate = def_ft[i].rate;
+	}
+	voltdm_reset_s(mpu_voltdm);
+	mutex_unlock(&omap_dvfs_lock);
+	mutex_unlock(omap_cpufreq_lock_p);
+}
+
 static int __init cpu_control_init(void) {
 	struct proc_dir_entry *proc_entry;
 	struct opp *gpu_opp;
-
-	int i;
+	int ret;
 	unsigned long freq = ULONG_MAX;
 
 	pr_info("cpu-control : Hello world!\n");
-	//opp.c
+
+	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
+	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct mutex*, omap_cpufreq_lock, omap_cpufreq_lock_p);
+
+	/* drivers/base/power/opp.c */
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_add, opp_add_s);
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_enable, opp_enable_s);
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_get_opp_count, opp_get_opp_count_s);
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_find_freq_floor, opp_find_freq_floor_s);
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_find_freq_ceil, opp_find_freq_ceil_s);
-	//voltage.c
+
+	/* arch/arm/mach-omap2/voltage.c */
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, voltdm_lookup, voltdm_lookup_s);
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, voltdm_reset, voltdm_reset_s);
-	// cpufreq.c
+
+	/* drivers/cpufreq/cpufreq.c */
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, __find_governor, __find_governor_s);
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, __cpufreq_set_policy, __cpufreq_set_policy_s);
 
@@ -269,14 +340,11 @@ static int __init cpu_control_init(void) {
 		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
 		return -ENOMEM;
 	}
-	for(i = 0; i<mpu_opp_count; i++) {
-		def_ft[i].index = i;
-		freq = (freq_table[i].frequency-1000) * 1000;
-		def_ft[i].opp = opp_find_freq_ceil_s(mpu_dev, &freq);
-		def_ft[i].rate = def_ft[i].opp->rate;
-		def_ft[i].u_volt = def_ft[i].opp->u_volt;
-		pr_info("Map %d : %lu Mhz : %lu mV\n", def_ft[i].index, def_ft[i].rate/1000000, def_ft[i].u_volt/1000);
-	}
+
+	ret = populate_def_freq_table()
+        if (!ret)
+		goto populate_table_fail;
+
 		
 	//pr_info("GPU OPP counts : %d\n", opp_get_opp_count_s(gpu_dev));
 	gpu_opp = opp_find_freq_floor_s(gpu_dev, &freq);
@@ -291,7 +359,8 @@ static int __init cpu_control_init(void) {
 	buf = (char *)vmalloc(BUF_SIZE);
 	if (!buf) {
 		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto buf_alloc_fail;
 	}
 
 	proc_mkdir("cpu_control", NULL);
@@ -390,6 +459,12 @@ static int __init cpu_control_init(void) {
 	}
 */
 	return 0;
+
+buf_alloc_fail:
+populate_table_fail:
+	kfree(def_ft);
+
+	return ret;
 }
 
 static void __exit cpu_control_exit(void){
@@ -404,6 +479,7 @@ static void __exit cpu_control_exit(void){
 	remove_proc_entry("cpu_control", NULL);
 	vfree(buf);
 
+	// this seems unsafe. __set_policy should be able to handle most of this...
 	policy->min = policy->cpuinfo.min_freq = policy->user_policy.min =
 	policy->max = policy->cpuinfo.max_freq = policy->user_policy.max =
 	def_ft[opp_count-1].rate/1000;
@@ -416,16 +492,9 @@ static void __exit cpu_control_exit(void){
 		pr_info("cpu-control : Change cpufreq gov : %s\n", policy->governor->name);
 	}
 
-	mutex_lock(&omap_dvfs_lock);
-	for(i = 0; i<opp_count; i++) {
-		freq_table[i].frequency = def_ft[i].rate/1000;
-		mpu_vdd->volt_data[i].volt_nominal = def_ft[i].u_volt;
-		mpu_vdd->dep_vdd_info[0].dep_table[i].main_vdd_volt = def_ft[i].u_volt;
-		def_ft[i].opp->u_volt = def_ft[i].u_volt;
-		def_ft[i].opp->rate = def_ft[i].rate;
-	}
-	voltdm_reset_s(mpu_voltdm);
-	mutex_unlock(&omap_dvfs_lock);
+	restore_def_freq_table();
+
+	kfree(def_ft);
 
 	if (change) {
 		set_governor(policy, def_governor);

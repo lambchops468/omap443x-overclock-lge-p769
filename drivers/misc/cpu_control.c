@@ -87,6 +87,9 @@ static int set_governor(struct cpufreq_policy *policy, char str_governor[16]) {
 	if (!policy)
 		return ret;
 
+	//NEED TO LOCK cpufreq_governor_mutex to call __find_governor_s()
+	//NEED TO LOCK lock_policy_rwsem_write (yes)
+
 	memcpy(&new_policy, policy, sizeof(struct cpufreq_policy));
 	cpufreq_get_policy(&new_policy, policy->cpu);
 	t = __find_governor_s(str_governor);
@@ -103,6 +106,7 @@ static int set_governor(struct cpufreq_policy *policy, char str_governor[16]) {
 	return ret;
 }
 
+/* sysfs please. */
 /*  proc fs */
 static int proc_gpu_cpu_speed(char *buffer, char **buffer_location, off_t offset, int count, int *eof, void *data) {
 	int ret = 0;
@@ -179,10 +183,13 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 
 		freq_table[id].frequency = freq * 1000;
 		mpu_vdd->volt_data[id].volt_nominal = volt * 1000;
+		// this is wrong. wrong. wrong. all. wrong.
 		mpu_vdd->dep_vdd_info[0].dep_table[id].main_vdd_volt = volt * 1000;
+
 		def_ft[id].opp->u_volt = volt * 1000;
 		def_ft[id].opp->rate = freq * 1000000;
 
+		//why? why? postpone to actual frequency change.
 		voltdm_reset_s(mpu_voltdm);
 		mutex_unlock(&omap_dvfs_lock);
 		mutex_unlock(omap_cpufreq_lock_p);
@@ -256,6 +263,7 @@ static int __exit restore_def_freq_table() {
 		def_ft[i].opp->u_volt = def_ft[i].u_volt;
 		def_ft[i].opp->rate = def_ft[i].rate;
 	}
+		//why? why? postpone to actual frequency change.
 	voltdm_reset_s(mpu_voltdm);
 	mutex_unlock(&omap_dvfs_lock);
 	mutex_unlock(omap_cpufreq_lock_p);
@@ -480,6 +488,10 @@ static void __exit cpu_control_exit(void){
 	vfree(buf);
 
 	// this seems unsafe. __set_policy should be able to handle most of this...
+	// to do this, set the governor to performance. then we don't even need this following 3 lines...
+	//
+	// actually, we should extend set_governor to take min/max as args and change the to-be-inserted policy.
+	// for the other half, we would also need to mdify cpuinfo.min_freq and cpuinfo.max_freq in the to-be-inserted policy. maybe.
 	policy->min = policy->cpuinfo.min_freq = policy->user_policy.min =
 	policy->max = policy->cpuinfo.max_freq = policy->user_policy.max =
 	def_ft[opp_count-1].rate/1000;
@@ -501,6 +513,7 @@ static void __exit cpu_control_exit(void){
 		pr_info("cpu_control : Revert cpufreq gov : %s\n", policy->governor->name);
 	}
 
+	// however, we do need this, as the frequencies have changed. or does set_governor() do this for us? hm.
 	policy->min = policy->cpuinfo.min_freq = policy->user_policy.min = freq_table[0].frequency;
 	policy->max = policy->cpuinfo.max_freq = policy->user_policy.max = freq_table[opp_count-1].frequency;
 	pr_info("cpu_control : Goodbye\n");

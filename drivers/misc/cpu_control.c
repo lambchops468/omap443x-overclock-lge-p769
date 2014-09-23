@@ -74,13 +74,13 @@ extern struct mutex omap_dvfs_lock;
 static struct opp_table *def_ft;
 
 static int mpu_opp_count;
-static char def_governor[16];
-static char good_governor[16] = "hotplug";
+static char def_governor[CPUFREQ_NAME_LEN];
+static char good_governor[CPUFREQ_NAME_LEN] = "hotplug";
 
 #define BUF_SIZE PAGE_SIZE
 static char *buf;
 
-static int set_governor(struct cpufreq_policy *policy, char str_governor[16]) {
+static int set_governor(struct cpufreq_policy *policy, char str_governor[CPUFREQ_NAME_LEN]) {
 	unsigned int ret = -EINVAL;
 	struct cpufreq_governor *t;
 	struct cpufreq_policy new_policy;

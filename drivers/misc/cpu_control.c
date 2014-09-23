@@ -88,7 +88,8 @@ static int set_governor(struct cpufreq_policy *policy, char str_governor[16]) {
 		return ret;
 
 	//NEED TO LOCK cpufreq_governor_mutex to call __find_governor_s()
-	//NEED TO LOCK lock_policy_rwsem_write (yes)
+	//NEED TO LOCK lock_policy_rwsem_write (yes) <-- this will also prevent calls to target()
+	//maybe use parse_governor?
 
 	memcpy(&new_policy, policy, sizeof(struct cpufreq_policy));
 	cpufreq_get_policy(&new_policy, policy->cpu);
@@ -277,6 +278,8 @@ static int __init cpu_control_init(void) {
 
 	pr_info("cpu-control : Hello world!\n");
 
+	// todo: ensure this cpu is omap443x
+
 	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct mutex*, omap_cpufreq_lock, omap_cpufreq_lock_p);
 
@@ -301,6 +304,9 @@ static int __init cpu_control_init(void) {
 		return -EINVAL;
 	}
 
+	/* cpufreq_cpu_get() should only be done on CPU0 (the boot cpu). For other
+	 * CPUs, the policy is destroyed/created on cpu hotplug (which happens during
+	 * suspend). cpufreq_cpu_get() gets the omap2plus-cpufreq module  */
 	policy = cpufreq_cpu_get(0);
 	if (!policy) {
 		pr_err("%s:No cpufreq driver\n", __func__);

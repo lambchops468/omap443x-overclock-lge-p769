@@ -162,7 +162,7 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 		//some filter
 		if (volt > OMAP4_VP_MPU_VLIMITTO_VDDMAX/1000) volt = OMAP4_VP_MPU_VLIMITTO_VDDMAX/1000;
 		if (volt < OMAP4_VP_MPU_VLIMITTO_VDDMIN/1000) volt = OMAP4_VP_MPU_VLIMITTO_VDDMIN/1000;
-		if (freq > 2000) freq = def_ft[mpu_opp_count-1].rate/1000;
+		if (freq > 2000) freq = def_ft[mpu_opp_count-1].rate/1000000;
 		if (freq < 0) freq = def_ft[0].rate/1000;
 
 		pr_info("cpu-control : Change operating point : %d %d Mhz %d mV\n", id, freq, volt);

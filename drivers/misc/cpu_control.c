@@ -30,6 +30,9 @@
 #include "../../../arch/arm/mach-omap2/voltage.h"
 #include "../symsearch/symsearch.h"
 
+#define MPU_MAX_UVOLT 1415000
+#define MPU_MIN_UVOLT 830000
+
 /* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 static struct mutex *omap_cpufreq_lock_p = NULL;
 
@@ -162,7 +165,7 @@ static int finish_opp_modify() {
  * Freq in Hz
  * Volt in uV
  */
-static int set_one_opp(int index, int freq, int volt) {
+static int set_one_opp(unsigned int index, unsigned int freq, unsigned int volt) {
 	freq_table[index].frequency = freq/1000;
 	mpu_vdd->volt_data[index].volt_nominal = volt;
 	// this is wrong. wrong. wrong. all. wrong.
@@ -209,10 +212,9 @@ static int proc_mpu_opp_cur(char *buffer, char **buffer_location, off_t offset, 
 }
 
 static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned long len, void *data) {
-	int id;
-	int freq; //in KHz
-	int volt; //in mV
-	bool change;
+	unsigned int id;
+	unsigned int freq; //in KHz
+	unsigned int volt; //in mV
 	if(!len || len >= BUF_SIZE)
 		return -ENOSPC;
 
@@ -220,21 +222,38 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 		return -EFAULT;
 
 	buf[len] = 0;
-	if(sscanf(buf, "%d %d %d", &id, &freq, &volt) == 3) {
-		if ((id > mpu_opp_count-1) || (id < 0)) {
-			pr_err("cpu-control : wrong cpu opp id @ %d", id);
-			return -EFAULT;
-		}
-		//some filter
-		if (volt > OMAP4_VP_MPU_VLIMITTO_VDDMAX/1000) volt = OMAP4_VP_MPU_VLIMITTO_VDDMAX/1000;
-		if (volt < OMAP4_VP_MPU_VLIMITTO_VDDMIN/1000) volt = OMAP4_VP_MPU_VLIMITTO_VDDMIN/1000;
-		if (freq > 2000) freq = def_ft[mpu_opp_count-1].rate/1000000;
-		if (freq < 0) freq = def_ft[0].rate/1000;
+	if(sscanf(buf, "%u %u %u", &id, &freq, &volt) == 3) {
+		freq = freq * 1000; /* convert from MHz to KHz */
 
-		pr_info("cpu-control : Change operating point : %d %d Mhz %d mV\n", id, freq, volt);
+		if (id > mpu_opp_count-1) {
+			pr_err("cpu-control : wrong cpu opp id @ %u", id);
+			return -EINVAL;
+		}
+
+		if (id > 0 && freq_table[id-1].frequency >= freq) {
+			pr_err("cpu-control : Frequency is not above previous OPP's frequency");
+			return -EINVAL;
+		}
+
+		if (id < mpu_opp_count-1 && freq_table[id+1].frequency <= freq) {
+			pr_err("cpu-control : Frequency is not below next OPP's frequency");
+			return -EINVAL;
+		}
+
+		if (volt > MPU_MAX_UVOLT/1000) {
+			pr_info("cpu-control : Too high voltage, limiting to %lu", MPU_MAX_UVOLT/1000);
+			volt = MPU_MAX_UVOLT/1000;
+		}
+
+		if (volt < MPU_MIN_UVOLT/1000) {
+			pr_info("cpu-control : Too low voltage, limiting to %lu", MPU_MIN_UVOLT/1000);
+			volt = MPU_MIN_UVOLT/1000;
+		}
+
+		pr_info("cpu-control : Change operating point : %lu %lu Mhz %lu mV\n", id, freq/1000, volt);
 
 		prepare_opp_modify();
-		set_one_opp(id, freq*1000000, volt*1000);
+		set_one_opp(id, freq*1000, volt*1000);
 		finish_opp_modify();
 	}
 	return len;
@@ -504,9 +523,6 @@ populate_table_fail:
 }
 
 static void __exit cpu_control_exit(void){
-	int i;
-	bool change;
-
 	pr_info("cpu_control : Reset opp table to default.\n");
 	remove_proc_entry("cpu_control/frequency_current", NULL);
 	remove_proc_entry("cpu_control/opp_table_current", NULL);

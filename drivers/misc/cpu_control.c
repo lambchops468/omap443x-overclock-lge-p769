@@ -74,36 +74,90 @@ extern struct mutex omap_dvfs_lock;
 static struct opp_table *def_ft;
 
 static int mpu_opp_count;
-static char def_governor[CPUFREQ_NAME_LEN];
-static char good_governor[CPUFREQ_NAME_LEN] = "hotplug";
+static char prev_governor[CPUFREQ_NAME_LEN];
+static char performance_governor[CPUFREQ_NAME_LEN] = "performance";
 
 #define BUF_SIZE PAGE_SIZE
 static char *buf;
 
-static int set_governor(struct cpufreq_policy *policy, char str_governor[CPUFREQ_NAME_LEN]) {
+static int set_cpufreq_policy(char str_governor[CPUFREQ_NAME_LEN],
+		unsigned int min_freq,
+		unsigned int max_freq) {
 	unsigned int ret = -EINVAL;
-	struct cpufreq_governor *t;
 	struct cpufreq_policy new_policy;
 	if (!policy)
 		return ret;
 
-	//NEED TO LOCK cpufreq_governor_mutex to call __find_governor_s()
-	//NEED TO LOCK lock_policy_rwsem_write (yes) <-- this will also prevent calls to target()
-	//maybe use parse_governor?
-
-	cpufreq_get_policy(&new_policy, policy->cpu);
-	t = __find_governor_s(str_governor);
-	if (t != NULL) {
-		new_policy.governor = t;
-	} else {
+	ret = cpufreq_get_policy(&new_policy, policy->cpu);
+	if (ret)
 		return ret;
-	}
+
+	if (cpufreq_parse_governor(str_governor, &new_policy.policy,
+						&new_policy.governor))
+		return ret;
+
+	new_policy.min = min_freq;
+	new_policy.max = max_freq;
 
 	ret = __cpufreq_set_policy_s(policy, &new_policy);
 
 	policy->user_policy.policy = policy->policy;
 	policy->user_policy.governor = policy->governor;
+
 	return ret;
+}
+
+static int set_cpufreq_governor(char str_governor[CPUFREQ_NAME_LEN]) {
+	return set_cpufreq_policy(str_governor, policy->min, policy->max);
+}
+
+static int prepare_opp_modify() {
+	/* Lock the core cpufreq policy. The same policy object and lock exists
+	 * for CPU0 and CPU1 because they are both related */
+	lock_policy_rwsem_write(policy->cpu);
+
+	/* change governor to performance. When this returns, we will have
+	 * transistioned to the fastest frequency. Since the performance
+	 * governor never calls the cpufreq driver's target() function ever
+	 * again, we are safe from frequency switches caused by the governor.
+	 * The other source of frequency switches is omap_thermal_throttle(),
+	 * but that is protected by omap_cpufreq_lock. */
+	pr_info("cpu-control : Current cpufreq gov : %s\n", policy->governor->name);
+	strncpy(prev_governor, policy->governor->name, CPUFREQ_NAME_LEN);
+	if (strnicmp(policy->governor->name, performance_governor, CPUFREQ_NAME_LEN)) {
+		set_cpufreq_governor(performance_governor);
+		pr_info("cpu-control : Change cpufreq gov : %s\n", policy->governor->name);
+	}
+
+	/* Stop the omap2plus-cpufreq driver from trying to change frequency -
+	 * For example, to stop omap_thermal_throttle(), which is not called
+	 * from the cpufreq framework. */
+	mutex_lock(omap_cpufreq_lock_p);
+	/* Take this lock to prevent dvfs from attempting to use the opp
+	 * being modified (this might occur during cross-domain changes)  */
+	mutex_lock(&omap_dvfs_lock);
+}
+
+static int finish_opp_modify() {
+	unsigned int min_freq_new = freq_table[0].frequency;
+	unsigned int max_freq_new = freq_table[mpu_opp_count-1].frequency;
+
+	mutex_unlock(&omap_dvfs_lock);
+	mutex_unlock(omap_cpufreq_lock_p);
+
+	policy->cpuinfo.min_freq = policy->user_policy.min = min_freq_new;
+	policy->cpuinfo.max_freq = policy->user_policy.max = max_freq_new;
+
+	/* This will cause the governor, even if the same governor,
+	 * to notice the new frequency limits */
+	set_cpufreq_policy(prev_governor,
+			freq_table[0].frequency,
+			freq_table[mpu_opp_count-1].frequency);
+	pr_info("cpu_control : Reset cpufreq gov : %s\n", policy->governor->name);
+
+	/* change governor back to whatever it was before we started */
+	/* set appropriate min/max too */
+	unlock_policy_rwsem_write(policy->cpu);
 }
 
 /*
@@ -181,35 +235,11 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 
 		pr_info("cpu-control : Change operating point : %d %d Mhz %d mV\n", id, freq, volt);
 
-		policy->min = policy->cpuinfo.min_freq = policy->user_policy.min =
-		policy->max = policy->cpuinfo.max_freq = policy->user_policy.max =
-		def_ft[mpu_opp_count-1].rate/1000;
-
-		pr_info("cpu-control : Current cpufreq gov : %s\n", policy->governor->name);
-		if (strnicmp(policy->governor->name, good_governor, CPUFREQ_NAME_LEN)) {
-			strcpy(def_governor, policy->governor->name);
-			set_governor(policy, good_governor);
-			change = true;
-			pr_info("cpu-control : Change cpufreq gov : %s\n", policy->governor->name);
-		}
-
-		mutex_lock(omap_cpufreq_lock_p);
-		mutex_lock(&omap_dvfs_lock);
-
+		prepare_opp_modify();
 		set_one_opp(id, freq*1000000, volt*1000);
-
 		//why? why? postpone to actual frequency change.
 		voltdm_reset_s(mpu_voltdm);
-		mutex_unlock(&omap_dvfs_lock);
-		mutex_unlock(omap_cpufreq_lock_p);
-
-		if (change) {
-			set_governor(policy, def_governor);
-			pr_info("cpu_control : Revert cpufreq gov : %s\n", policy->governor->name);
-		}
-
-		policy->min = policy->cpuinfo.min_freq = policy->user_policy.min = freq_table[0].frequency;
-		policy->max = policy->cpuinfo.max_freq = policy->user_policy.max = freq_table[opp_count-1].frequency;
+		finish_opp_modify();
 	}
 	return len;
 }
@@ -220,7 +250,6 @@ static int __init populate_def_freq_table() {
 	int ret = 0;
 	int i;
 
-	mutex_lock(omap_cpufreq_lock_p);
 	/* half hearted attempt at being 'correct' - the opp interface asks us
 	 * to rcu_read_lock() before using opp_find_*. It also requires that we
 	 * hold the dev_opp_list_lock when modifying the list, and use appropriate
@@ -257,21 +286,17 @@ static int __init populate_def_freq_table() {
 	}
 out:
 	rcu_read_unlock();
-	mutex_unlock(omap_cpufreq_lock_p);
 
 	return ret;
 }
 
 static int __exit restore_def_freq_table() {
-	mutex_lock(omap_cpufreq_lock_p);
-	mutex_lock(&omap_dvfs_lock);
+
 	for(i = 0; i<opp_count; i++) {
 		set_one_opp(i, def_ft[i].rate, def_ft[i].u_volt);
 	}
-		//why? why? postpone to actual frequency change.
+	//why? why? postpone to actual frequency change.
 	voltdm_reset_s(mpu_voltdm);
-	mutex_unlock(&omap_dvfs_lock);
-	mutex_unlock(omap_cpufreq_lock_p);
 }
 
 static int __init cpu_control_init(void) {
@@ -497,35 +522,12 @@ static void __exit cpu_control_exit(void){
 	remove_proc_entry("cpu_control", NULL);
 	vfree(buf);
 
-	// this seems unsafe. __set_policy should be able to handle most of this...
-	// to do this, set the governor to performance. then we don't even need this following 3 lines...
-	//
-	// actually, we should extend set_governor to take min/max as args and change the to-be-inserted policy.
-	// for the other half, we would also need to mdify cpuinfo.min_freq and cpuinfo.max_freq in the to-be-inserted policy. maybe.
-	policy->min = policy->cpuinfo.min_freq = policy->user_policy.min =
-	policy->max = policy->cpuinfo.max_freq = policy->user_policy.max =
-	def_ft[opp_count-1].rate/1000;
-
-	pr_info("cpu-control : Current cpufreq gov : %s\n", policy->governor->name);
-	if (policy->governor->name != good_governor) {
-		strcpy(def_governor, policy->governor->name);
-		set_governor(policy, good_governor);
-		change = true;
-		pr_info("cpu-control : Change cpufreq gov : %s\n", policy->governor->name);
-	}
-
+	prepare_opp_modify();
 	restore_def_freq_table();
+	finish_opp_modify();
 
 	kfree(def_ft);
 
-	if (change) {
-		set_governor(policy, def_governor);
-		pr_info("cpu_control : Revert cpufreq gov : %s\n", policy->governor->name);
-	}
-
-	// however, we do need this, as the frequencies have changed. or does set_governor() do this for us? hm.
-	policy->min = policy->cpuinfo.min_freq = policy->user_policy.min = freq_table[0].frequency;
-	policy->max = policy->cpuinfo.max_freq = policy->user_policy.max = freq_table[opp_count-1].frequency;
 	pr_info("cpu_control : Goodbye\n");
 }
 

@@ -41,7 +41,6 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(struct opp *, opp_find_freq_floor_s, struct de
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct opp *, opp_find_freq_ceil_s, struct device *dev, unsigned long *freq);
 /* arch/arm/mach-omap2/voltage.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct voltagedomain *, voltdm_lookup_s, char *name);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(void, voltdm_reset_s, struct voltagedomain *voltdm);
 /* drivers/cpufreq/cpufreq.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct cpufreq_governor *, __find_governor_s, const char *str_governor);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, __cpufreq_set_policy_s, struct cpufreq_policy *data, struct cpufreq_policy *policy);
@@ -67,7 +66,6 @@ struct opp_table {
 static struct cpufreq_frequency_table *freq_table;
 static struct cpufreq_policy *policy;
 static struct device *mpu_dev, *gpu_dev;
-static struct voltagedomain *mpu_voltdm;
 static struct omap_vdd_info *mpu_vdd;
 static struct clk *mpu_clk, *gpu_clk;
 extern struct mutex omap_dvfs_lock;
@@ -237,8 +235,6 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 
 		prepare_opp_modify();
 		set_one_opp(id, freq*1000000, volt*1000);
-		//why? why? postpone to actual frequency change.
-		voltdm_reset_s(mpu_voltdm);
 		finish_opp_modify();
 	}
 	return len;
@@ -291,17 +287,15 @@ out:
 }
 
 static int __exit restore_def_freq_table() {
-
 	for(i = 0; i<opp_count; i++) {
 		set_one_opp(i, def_ft[i].rate, def_ft[i].u_volt);
 	}
-	//why? why? postpone to actual frequency change.
-	voltdm_reset_s(mpu_voltdm);
 }
 
 static int __init cpu_control_init(void) {
 	struct proc_dir_entry *proc_entry;
 	struct opp *gpu_opp;
+	struct voltagedomain *mpu_voltdm;
 	int ret;
 	unsigned long freq = ULONG_MAX;
 
@@ -321,7 +315,6 @@ static int __init cpu_control_init(void) {
 
 	/* arch/arm/mach-omap2/voltage.c */
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, voltdm_lookup, voltdm_lookup_s);
-	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, voltdm_reset, voltdm_reset_s);
 
 	/* drivers/cpufreq/cpufreq.c */
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, __find_governor, __find_governor_s);

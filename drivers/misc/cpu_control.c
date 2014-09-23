@@ -186,7 +186,7 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 		def_ft[mpu_opp_count-1].rate/1000;
 
 		pr_info("cpu-control : Current cpufreq gov : %s\n", policy->governor->name);
-		if (policy->governor->name != good_governor) {
+		if (strnicmp(policy->governor->name, good_governor, CPUFREQ_NAME_LEN)) {
 			strcpy(def_governor, policy->governor->name);
 			set_governor(policy, good_governor);
 			change = true;

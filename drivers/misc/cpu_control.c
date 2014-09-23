@@ -91,7 +91,6 @@ static int set_governor(struct cpufreq_policy *policy, char str_governor[16]) {
 	//NEED TO LOCK lock_policy_rwsem_write (yes) <-- this will also prevent calls to target()
 	//maybe use parse_governor?
 
-	memcpy(&new_policy, policy, sizeof(struct cpufreq_policy));
 	cpufreq_get_policy(&new_policy, policy->cpu);
 	t = __find_governor_s(str_governor);
 	if (t != NULL) {

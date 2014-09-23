@@ -107,6 +107,19 @@ static int set_governor(struct cpufreq_policy *policy, char str_governor[16]) {
 	return ret;
 }
 
+/*
+ * Freq in Hz
+ * Volt in uV
+ */
+static int set_one_opp(int index, int freq, int volt) {
+	freq_table[index].frequency = freq/1000;
+	mpu_vdd->volt_data[index].volt_nominal = volt;
+	// this is wrong. wrong. wrong. all. wrong.
+	mpu_vdd->dep_vdd_info[0].dep_table[index].main_vdd_volt = volt;
+	def_ft[index].opp->u_volt = volt;
+	def_ft[index].opp->rate = freq;
+}
+
 /* sysfs please. */
 /*  proc fs */
 static int proc_gpu_cpu_speed(char *buffer, char **buffer_location, off_t offset, int count, int *eof, void *data) {
@@ -145,7 +158,9 @@ static int proc_mpu_opp_cur(char *buffer, char **buffer_location, off_t offset, 
 }
 
 static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned long len, void *data) {
-	int id, freq,volt;
+	int id;
+	int freq; //in KHz
+	int volt; //in mV
 	bool change;
 	if(!len || len >= BUF_SIZE)
 		return -ENOSPC;
@@ -182,13 +197,7 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 		mutex_lock(omap_cpufreq_lock_p);
 		mutex_lock(&omap_dvfs_lock);
 
-		freq_table[id].frequency = freq * 1000;
-		mpu_vdd->volt_data[id].volt_nominal = volt * 1000;
-		// this is wrong. wrong. wrong. all. wrong.
-		mpu_vdd->dep_vdd_info[0].dep_table[id].main_vdd_volt = volt * 1000;
-
-		def_ft[id].opp->u_volt = volt * 1000;
-		def_ft[id].opp->rate = freq * 1000000;
+		set_one_opp(id, freq*1000000, volt*1000);
 
 		//why? why? postpone to actual frequency change.
 		voltdm_reset_s(mpu_voltdm);
@@ -258,11 +267,7 @@ static int __exit restore_def_freq_table() {
 	mutex_lock(omap_cpufreq_lock_p);
 	mutex_lock(&omap_dvfs_lock);
 	for(i = 0; i<opp_count; i++) {
-		freq_table[i].frequency = def_ft[i].rate/1000;
-		mpu_vdd->volt_data[i].volt_nominal = def_ft[i].u_volt;
-		mpu_vdd->dep_vdd_info[0].dep_table[i].main_vdd_volt = def_ft[i].u_volt;
-		def_ft[i].opp->u_volt = def_ft[i].u_volt;
-		def_ft[i].opp->rate = def_ft[i].rate;
+		set_one_opp(i, def_ft[i].rate, def_ft[i].u_volt);
 	}
 		//why? why? postpone to actual frequency change.
 	voltdm_reset_s(mpu_voltdm);

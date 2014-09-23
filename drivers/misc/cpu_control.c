@@ -342,7 +342,8 @@ static int __init cpu_control_init(void) {
 	freq_table = cpufreq_frequency_get_table(0);
 	if (!freq_table) {
 		pr_err("%s:No cpufreq driver\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_out;
 	}
 
 	/* cpufreq_cpu_get() should only be done on CPU0 (the boot cpu). For other
@@ -351,56 +352,78 @@ static int __init cpu_control_init(void) {
 	policy = cpufreq_cpu_get(0);
 	if (!policy) {
 		pr_err("%s:No cpufreq driver\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_out;
 	}
 
 	mpu_clk = clk_get(NULL, "dpll_mpu_ck");
 	if (IS_ERR(mpu_clk)) {
 		pr_err("%s:Unable to get mpu_clk\n", __func__);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_cpu_put;
 	}
 
 	mpu_voltdm = voltdm_lookup_s("mpu");
 	if (!mpu_voltdm || IS_ERR(mpu_voltdm)) {
 		pr_err("cpu-control: %s: Unable to get mpu voltage domain\n", __func__);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_cpu_put;
 	}
 	mpu_vdd = mpu_voltdm->vdd;
 
 	mpu_dev = omap2_get_mpuss_device();
 	if (!mpu_dev || IS_ERR(mpu_dev)) {
 		pr_err("cpu-control: %s: Unable to get mpu device\n", __func__);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_cpu_put;
 	}
 	mpu_opp_count = opp_get_opp_count_s(mpu_dev);
 	if (mpu_opp_count <= 0) {
 		pr_err("cpu-control: %s: Could not get opp count for mpu\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_cpu_put;
 	}
 
 	gpu_clk = clk_get(NULL, "gpu_fck");
 	if (IS_ERR(gpu_clk)) {
 		pr_err("%s:Unable to get gpu_clk\n", __func__);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_cpu_put;
 	}
 
 	gpu_dev = omap_hwmod_name_get_dev("gpu");
 	if (!gpu_dev || IS_ERR(gpu_dev)) {
 		pr_err("cpu-control: %s: Unable to get gpu device\n", __func__);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_cpu_put;
 	}
 
 	def_ft = kzalloc(sizeof(struct opp_table) * (mpu_opp_count), GFP_KERNEL);
 	if (!def_ft) {
 		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_cpu_put;
 	}
 
 	ret = populate_def_freq_table()
         if (!ret)
-		goto populate_table_fail;
+		goto err_free_def_ft;
 
 		
+	buf = (char *)vmalloc(BUF_SIZE);
+	if (!buf) {
+		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
+		ret = -ENOMEM;
+		goto err_free_def_ft;
+	}
+
+	proc_mkdir("cpu_control", NULL);
+	proc_entry = create_proc_read_entry("cpu_control/frequency_current", 0444, NULL, proc_gpu_cpu_speed, NULL);
+	proc_entry = create_proc_read_entry("cpu_control/opp_table_current", 0444, NULL, proc_mpu_opp_cur, NULL);
+	proc_entry = create_proc_read_entry("cpu_control/opp_table_default", 0444, NULL, proc_mpu_opp_def, NULL);
+	proc_entry = create_proc_read_entry("cpu_control/tweak_cpu", 0644, NULL, NULL, NULL);
+	proc_entry->write_proc = proc_cpu_tweak;
+
 	//pr_info("GPU OPP counts : %d\n", opp_get_opp_count_s(gpu_dev));
 	gpu_opp = opp_find_freq_floor_s(gpu_dev, &freq);
 	//gpu_opp->rate = 384000000;
@@ -411,19 +434,6 @@ static int __init cpu_control_init(void) {
 		opp_enable_s(gpu_dev, 384000000);
 	}
 */
-	buf = (char *)vmalloc(BUF_SIZE);
-	if (!buf) {
-		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
-		ret = -ENOMEM;
-		goto buf_alloc_fail;
-	}
-
-	proc_mkdir("cpu_control", NULL);
-	proc_entry = create_proc_read_entry("cpu_control/frequency_current", 0444, NULL, proc_gpu_cpu_speed, NULL);
-	proc_entry = create_proc_read_entry("cpu_control/opp_table_current", 0444, NULL, proc_mpu_opp_cur, NULL);
-	proc_entry = create_proc_read_entry("cpu_control/opp_table_default", 0444, NULL, proc_mpu_opp_def, NULL);
-	proc_entry = create_proc_read_entry("cpu_control/tweak_cpu", 0644, NULL, NULL, NULL);
-	proc_entry->write_proc = proc_cpu_tweak;
 /*
 	//prepare
 	pr_info("Current cpufreq gov : %s\n", policy->governor->name);
@@ -515,10 +525,11 @@ static int __init cpu_control_init(void) {
 */
 	return 0;
 
-buf_alloc_fail:
-populate_table_fail:
+err_free_def_ft:
 	kfree(def_ft);
-
+err_cpu_put:
+	cpufreq_cpu_put(policy);
+err_out:
 	return ret;
 }
 
@@ -536,6 +547,8 @@ static void __exit cpu_control_exit(void){
 	finish_opp_modify();
 
 	kfree(def_ft);
+
+	cpufreq_cpu_put(policy);
 
 	pr_info("cpu_control : Goodbye\n");
 }

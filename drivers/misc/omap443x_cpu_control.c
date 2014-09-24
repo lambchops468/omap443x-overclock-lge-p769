@@ -49,15 +49,16 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(struct voltagedomain *, voltdm_lookup_s,
 		char *name);
 
 /* drivers/cpufreq/cpufreq.c */
+static struct mutex *cpufreq_governor_mutex_p;
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, __cpufreq_set_policy_s,
 		struct cpufreq_policy *data, struct cpufreq_policy *policy);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(int, cpufreq_parse_governor_s,
-		char *str_governor, unsigned int *policy, struct cpufreq_governor **governor);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, lock_policy_rwsem_write_s, int cpu);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(void, unlock_policy_rwsem_write_s, int cpu);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(struct cpufreq_governor*, __find_governor_s,
+		const char *str_governor);
 
 /* arch/arm/mach-omap2/dvfs.c */
-struct mutex *omap_dvfs_lock_p;
+static struct mutex *omap_dvfs_lock_p;
 
 
 struct opp {
@@ -91,6 +92,40 @@ static char performance_governor[CPUFREQ_NAME_LEN] = "performance";
 
 static struct kobject *cpucontrol_kobj;
 
+/* A replacement for cpufreq_parse_governor().
+ * For some reason the above function does not exist in the symbol tables.
+ * (it was probably inlined...)
+ */
+static int cpufreq_get_governor(char *str_governor, unsigned int *policy,
+				struct cpufreq_governor **governor) {
+	struct cpufreq_governor *t;
+	int err = -EINVAL;
+
+	mutex_lock(cpufreq_governor_mutex_p);
+
+	t = __find_governor_s(str_governor);
+
+	if (t == NULL) {
+		int ret;
+
+		mutex_unlock(cpufreq_governor_mutex_p);
+		ret = request_module("cpufreq_%s", str_governor);
+		mutex_lock(cpufreq_governor_mutex_p);
+
+		if (ret == 0)
+			t = __find_governor_s(str_governor);
+	}
+
+	if (t != NULL) {
+		*governor = t;
+		err = 0;
+	}
+
+	mutex_unlock(cpufreq_governor_mutex_p);
+
+	return err;
+}
+
 static int set_cpufreq_policy(char str_governor[CPUFREQ_NAME_LEN],
 		unsigned int min_freq,
 		unsigned int max_freq) {
@@ -103,7 +138,7 @@ static int set_cpufreq_policy(char str_governor[CPUFREQ_NAME_LEN],
 	if (ret)
 		return ret;
 
-	if (cpufreq_parse_governor_s(str_governor, &new_policy.policy,
+	if (cpufreq_get_governor(str_governor, &new_policy.policy,
 						&new_policy.governor))
 		return ret;
 
@@ -416,10 +451,11 @@ static int __init cpu_control_init(void) {
 	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, voltdm_lookup, voltdm_lookup_s);
 
 	/* drivers/cpufreq/cpufreq.c */
+	SYMSEARCH_BIND_POINTER_TO(omap443x_cpu_control, struct mutex*, cpufreq_governor_mutex, cpufreq_governor_mutex_p);
 	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, lock_policy_rwsem_write, lock_policy_rwsem_write_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, unlock_policy_rwsem_write, unlock_policy_rwsem_write_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, __cpufreq_set_policy, __cpufreq_set_policy_s);
-	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, cpufreq_parse_governor, cpufreq_parse_governor_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, __find_governor, __find_governor_s);
 
 	/* arch/arm/mach-omap2/dvfs.c */
 	SYMSEARCH_BIND_POINTER_TO(omap443x_cpu_control, struct mutex*, omap_dvfs_lock, omap_dvfs_lock_p);

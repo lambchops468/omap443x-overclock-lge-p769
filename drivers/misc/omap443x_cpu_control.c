@@ -376,13 +376,6 @@ static int __init cpu_control_init(void) {
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, __find_governor, __find_governor_s);
 	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, __cpufreq_set_policy, __cpufreq_set_policy_s);
 
-	freq_table = cpufreq_frequency_get_table(0);
-	if (!freq_table) {
-		pr_err("%s:No cpufreq driver\n", __func__);
-		ret = -EINVAL;
-		goto err_out;
-	}
-
 	/* cpufreq_cpu_get() should only be done on CPU0 (the boot cpu). For other
 	 * CPUs, the policy is destroyed/created on cpu hotplug (which happens during
 	 * suspend). cpufreq_cpu_get() gets the omap2plus-cpufreq module  */
@@ -391,6 +384,13 @@ static int __init cpu_control_init(void) {
 		pr_err("%s:No cpufreq driver\n", __func__);
 		ret = -EINVAL;
 		goto err_out;
+	}
+
+	freq_table = cpufreq_frequency_get_table(0);
+	if (!freq_table) {
+		pr_err("%s:No cpufreq driver\n", __func__);
+		ret = -EINVAL;
+		goto err_cpu_put;
 	}
 
 	mpu_clk = clk_get(NULL, "dpll_mpu_ck");

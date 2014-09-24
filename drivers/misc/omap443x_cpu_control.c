@@ -13,40 +13,47 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/sched.h>
 #include <linux/cpufreq.h>
 #include <linux/cpu.h>
 #include <linux/clk.h>
-#include <linux/kallsyms.h>
 #include <linux/mutex.h>
-#include <linux/proc_fs.h>
 #include <linux/string.h>
+#include <linux/slab.h>
 #include <linux/vmalloc.h>
-#include <asm/uaccess.h>
-#include <plat/omap-pm.h>
 #include <plat/omap_device.h>
 #include <plat/common.h>
-#include "../../../arch/arm/mach-omap2/omap_opp_data.h"
+
 #include "../../../arch/arm/mach-omap2/voltage.h"
-#include "../symsearch/symsearch.h"
+#include "symsearch/symsearch.h"
 
 #define MPU_MAX_UVOLT 1415000
 #define MPU_MIN_UVOLT 830000
 
 /* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 static struct mutex *omap_cpufreq_lock_p = NULL;
+static unsigned int *max_freq_p = NULL;
 
 /* drivers/base/power/opp.c */
-SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_add_s, struct device *dev, unsigned long freq, unsigned long u_volt);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_add_s, struct device *dev,
+		unsigned long freq, unsigned long u_volt);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_get_opp_count_s, struct device *dev);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_enable_s, struct device *dev, unsigned long freq);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(struct opp *, opp_find_freq_floor_s, struct device *dev, unsigned long *freq);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(struct opp *, opp_find_freq_ceil_s, struct device *dev, unsigned long *freq);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_enable_s, struct device *dev,
+		unsigned long freq);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(struct opp *, opp_find_freq_floor_s,
+		struct device *dev, unsigned long *freq);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(struct opp *, opp_find_freq_ceil_s,
+		struct device *dev, unsigned long *freq);
 /* arch/arm/mach-omap2/voltage.c */
-SYMSEARCH_DECLARE_FUNCTION_STATIC(struct voltagedomain *, voltdm_lookup_s, char *name);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(struct voltagedomain *, voltdm_lookup_s,
+		char *name);
 /* drivers/cpufreq/cpufreq.c */
-SYMSEARCH_DECLARE_FUNCTION_STATIC(struct cpufreq_governor *, __find_governor_s, const char *str_governor);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(int, __cpufreq_set_policy_s, struct cpufreq_policy *data, struct cpufreq_policy *policy);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int, __cpufreq_set_policy_s,
+		struct cpufreq_policy *data, struct cpufreq_policy *policy);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int, cpufreq_parse_governor_s,
+		char *str_governor, unsigned int *policy, struct cpufreq_governor **governor);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int, lock_policy_rwsem_write_s, int cpu);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(void, unlock_policy_rwsem_write_s, int cpu);
+
 
 struct opp {
 	char *hwmod_name;
@@ -78,10 +85,7 @@ static int mpu_opp_count;
 static char prev_governor[CPUFREQ_NAME_LEN];
 static char performance_governor[CPUFREQ_NAME_LEN] = "performance";
 
-#define BUF_SIZE PAGE_SIZE
-static char *buf;
-
-static struct *kobject cpucontrol_kobj;
+static struct kobject *cpucontrol_kobj;
 
 static int set_cpufreq_policy(char str_governor[CPUFREQ_NAME_LEN],
 		unsigned int min_freq,
@@ -95,7 +99,7 @@ static int set_cpufreq_policy(char str_governor[CPUFREQ_NAME_LEN],
 	if (ret)
 		return ret;
 
-	if (cpufreq_parse_governor(str_governor, &new_policy.policy,
+	if (cpufreq_parse_governor_s(str_governor, &new_policy.policy,
 						&new_policy.governor))
 		return ret;
 
@@ -114,12 +118,12 @@ static int set_cpufreq_governor(char str_governor[CPUFREQ_NAME_LEN]) {
 	return set_cpufreq_policy(str_governor, policy->min, policy->max);
 }
 
-static int prepare_opp_modify() {
+static int prepare_opp_modify(void) {
 	int ret = 0;
 
 	/* Lock the core cpufreq policy. The same policy object and lock exists
 	 * for CPU0 and CPU1 because they are both related */
-	if(lock_policy_rwsem_write(policy->cpu) < 0) {
+	if(lock_policy_rwsem_write_s(policy->cpu) < 0) {
 		ret = -ENODEV;
 		return ret;
 	}
@@ -153,11 +157,11 @@ static int prepare_opp_modify() {
 	return 0;
 
 out_err:
-	unlock_policy_rwsem_write(policy->cpu);
+	unlock_policy_rwsem_write_s(policy->cpu);
 	return ret;
 }
 
-static int finish_opp_modify() {
+static int finish_opp_modify(void) {
 	int ret;
 
 	unsigned int min_freq_new = freq_table[0].frequency;
@@ -166,7 +170,7 @@ static int finish_opp_modify() {
 	mutex_unlock(&omap_dvfs_lock);
 
 	/* Update omap2plus-cpufreq */
-	max_freq = max_freq_new;
+	*max_freq_p = max_freq_new;
 
 	mutex_unlock(omap_cpufreq_lock_p);
 
@@ -186,7 +190,7 @@ static int finish_opp_modify() {
 
 	/* change governor back to whatever it was before we started */
 	/* set appropriate min/max too */
-	unlock_policy_rwsem_write(policy->cpu);
+	unlock_policy_rwsem_write_s(policy->cpu);
 
 	return ret;
 }
@@ -205,20 +209,20 @@ static void set_one_opp(unsigned int index, unsigned int freq, unsigned int volt
 }
 
 /*  sysfs */
-static int cur_freq_show(struct kobject *kobj, struct kobj_attribute *attr,
+static ssize_t cur_freq_show(struct kobject *kobj, struct kobj_attribute *attr,
 		char *buf) {
 	return scnprintf(buf, PAGE_SIZE, "CPU : %lu Mhz\nGPU : %lu Mhz\n",
 			clk_get_rate(mpu_clk)/1000000,
 			clk_get_rate(gpu_clk)/1000000);
 }
 
-static int cpu_def_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
-		char *buf) {
+static ssize_t cpu_default_opp_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf) {
 	int i, ret;
 
-	ret = scnprintf(buffer, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
+	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
 	for(i = 0; i < mpu_opp_count; i++) {
-		ret += scnprintf(buffer+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
+		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
 			def_ft[i].index,
 			def_ft[i].rate/1000000,
 			def_ft[i].u_volt/1000);
@@ -227,13 +231,13 @@ static int cpu_def_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
 	return ret;
 }
 
-static int cpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
+static ssize_t cpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
 		char *buf) {
 	int i, ret;
 
-	ret = scnprintf(buffer, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
+	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
 	for(i = 0; i < mpu_opp_count; i++) {
-		ret += scnprintf(buffer+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
+		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
 			def_ft[i].index,
 			def_ft[i].opp->rate/1000000,
 			def_ft[i].opp->u_volt/1000);
@@ -242,15 +246,15 @@ static int cpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
 	return ret;
 }
 
-static int cpu_tweak_opp_store(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf, size_t count) {
+static ssize_t cpu_tweak_opp_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count) {
 	unsigned int id;
 	unsigned int freq; //in KHz
 	unsigned int volt; //in mV
 	int ret;
 
 	if(sscanf(buf, "%u %u %u", &id, &freq, &volt) != 3) {
-		return -EINVAL
+		return -EINVAL;
 	}
 
 	freq = freq * 1000000; /* convert from MHz to Hz */
@@ -277,16 +281,16 @@ static int cpu_tweak_opp_store(struct kobject *kobj,
 	}
 
 	if (volt > MPU_MAX_UVOLT/1000) {
-		pr_info("cpu-control : Too high voltage, limiting to %lu", MPU_MAX_UVOLT/1000);
+		pr_info("cpu-control : Too high voltage, limiting to %u", MPU_MAX_UVOLT/1000);
 		volt = MPU_MAX_UVOLT/1000;
 	}
 
 	if (volt < MPU_MIN_UVOLT/1000) {
-		pr_info("cpu-control : Too low voltage, limiting to %lu", MPU_MIN_UVOLT/1000);
+		pr_info("cpu-control : Too low voltage, limiting to %u", MPU_MIN_UVOLT/1000);
 		volt = MPU_MIN_UVOLT/1000;
 	}
 
-	pr_info("cpu-control : Change operating point : %lu %lu Mhz %lu mV\n",
+	pr_info("cpu-control : Change operating point : %u %u Mhz %u mV\n",
 			id, freq/1000000, volt);
 
 	ret = prepare_opp_modify();
@@ -314,8 +318,8 @@ static struct kobj_attribute cpu_tweak_opp_attr =
 static struct attribute *attrs[] = {
 	&cur_freq_attr.attr,
 	&cpu_cur_opp_attr.attr,
-	&cpu_default_opp.attr,
-	&cpu_tweak_opp.attr,
+	&cpu_default_opp_attr.attr,
+	&cpu_tweak_opp_attr.attr,
 	NULL
 };
 
@@ -325,7 +329,7 @@ static struct attribute_group attr_group = {
 
 /* sysfs end */
 
-static int __init populate_def_freq_table() {
+static int __init populate_def_freq_table(void) {
 	unsigned long freq;
 	int ret = 0;
 	int i;
@@ -370,14 +374,14 @@ out:
 	return ret;
 }
 
-static int __exit restore_def_freq_table() {
-	for(i = 0; i<opp_count; i++) {
+static void __exit restore_def_freq_table(void) {
+	int i;
+	for(i = 0; i < mpu_opp_count; i++) {
 		set_one_opp(i, def_ft[i].rate, def_ft[i].u_volt);
 	}
 }
 
 static int __init cpu_control_init(void) {
-	struct proc_dir_entry *proc_entry;
 	struct opp *gpu_opp;
 	struct voltagedomain *mpu_voltdm;
 	int ret;
@@ -391,21 +395,28 @@ static int __init cpu_control_init(void) {
 	}
 
 	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
-	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct mutex*, omap_cpufreq_lock, omap_cpufreq_lock_p);
+	/* freq_table and max_freq are popular symbol names in the kernel!
+	 * But we get lucky and the kernel only has one example of each
+	 * symbol (see System.map after compilation) */
+
+	SYMSEARCH_BIND_POINTER_TO(omap443x_cpu_control, struct mutex*, omap_cpufreq_lock, omap_cpufreq_lock_p);
+	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, unsigned int*, max_freq, max_freq_p);
 
 	/* drivers/base/power/opp.c */
-	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_add, opp_add_s);
-	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_enable, opp_enable_s);
-	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_get_opp_count, opp_get_opp_count_s);
-	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_find_freq_floor, opp_find_freq_floor_s);
-	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, opp_find_freq_ceil, opp_find_freq_ceil_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, opp_add, opp_add_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, opp_enable, opp_enable_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, opp_get_opp_count, opp_get_opp_count_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, opp_find_freq_floor, opp_find_freq_floor_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, opp_find_freq_ceil, opp_find_freq_ceil_s);
 
 	/* arch/arm/mach-omap2/voltage.c */
-	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, voltdm_lookup, voltdm_lookup_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, voltdm_lookup, voltdm_lookup_s);
 
 	/* drivers/cpufreq/cpufreq.c */
-	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, __find_governor, __find_governor_s);
-	SYMSEARCH_BIND_FUNCTION_TO(cpu_control, __cpufreq_set_policy, __cpufreq_set_policy_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, lock_policy_rwsem_write, lock_policy_rwsem_write_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, unlock_policy_rwsem_write, unlock_policy_rwsem_write_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, __cpufreq_set_policy, __cpufreq_set_policy_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, cpufreq_parse_governor, cpufreq_parse_governor_s);
 
 	/* cpufreq_cpu_get() should only be done on CPU0 (the boot cpu). For other
 	 * CPUs, the policy is destroyed/created on cpu hotplug (which happens during
@@ -473,23 +484,16 @@ static int __init cpu_control_init(void) {
 		goto err_cpu_put;
 	}
 
-	ret = populate_def_freq_table()
-		if (ret)
-			goto err_free_def_ft;
-
-
-	buf = (char *)vmalloc(BUF_SIZE);
-	if (!buf) {
-		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
-		ret = -ENOMEM;
+	ret = populate_def_freq_table();
+	if (ret)
 		goto err_free_def_ft;
-	}
+
 
 	/* Create a new sysfs directory under /sys/devices/system/cpu */
 	cpucontrol_kobj = kobject_create_and_add("cpucontrol", &cpu_sysdev_class.kset.kobj);
 	if (!cpucontrol_kobj) {
 		pr_err("cpu-control: %s: Unable to allocate new kobject\n", __func__);
-		goto err_free_buf;
+		goto err_free_def_ft;
 	}
 
 	ret = sysfs_create_group(cpucontrol_kobj, &attr_group);
@@ -505,8 +509,6 @@ static int __init cpu_control_init(void) {
 
 err_put_kobj:
 	kobject_put(cpucontrol_kobj);
-err_free_buf:
-	vfree(buf);
 err_free_def_ft:
 	kfree(def_ft);
 err_cpu_put:
@@ -516,12 +518,12 @@ err_out:
 }
 
 static void __exit cpu_control_exit(void){
+	int ret;
+
 	pr_info("cpu_control : Reset opp table to default.\n");
 
 	/* This will also remove the sysfs entries */
 	kobject_put(cpucontrol_kobj);
-
-	vfree(buf);
 
 	ret = prepare_opp_modify();
 	if (ret)

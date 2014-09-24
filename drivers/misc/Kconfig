@@ -567,6 +567,13 @@ config OMAP443X_DIE_TEMP_SENSOR
           temp sensor for the OMAP4430 platform. This driver does not require
           OMAP_TEMP_SENSOR
 
+config OMAP443X_CPU_CONTROL
+        tristate "OMAP4430 CPU Overclock Supprt"
+        depends on SYMSEARCH
+        default n
+        help
+          Enabling this config will give support overclocking OMAP4430
+
 config TWL6040_VIB
 	bool "TWL6040 Vibrator"
 	depends on TWL6040_CODEC && ANDROID_TIMED_OUTPUT

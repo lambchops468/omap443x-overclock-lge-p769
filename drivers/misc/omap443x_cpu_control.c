@@ -261,7 +261,7 @@ static ssize_t cpu_default_opp_show(struct kobject *kobj,
 
 	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
 	for(i = 0; i < mpu_opp_count; i++) {
-		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
+		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t\t%lu\n",
 			def_ft[i].index,
 			def_ft[i].rate/1000000,
 			def_ft[i].u_volt/1000);

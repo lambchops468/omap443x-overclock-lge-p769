@@ -146,12 +146,14 @@ static int finish_opp_modify() {
 	unsigned int max_freq_new = freq_table[mpu_opp_count-1].frequency;
 
 	mutex_unlock(&omap_dvfs_lock);
+
+	/* Update omap2plus-cpufreq */
+	max_freq = max_freq_new;
+
 	mutex_unlock(omap_cpufreq_lock_p);
 
 	policy->cpuinfo.min_freq = policy->user_policy.min = min_freq_new;
 	policy->cpuinfo.max_freq = policy->user_policy.max = max_freq_new;
-
-	//TODO: update max_freq
 
 	/* This will cause the governor, even if the same governor,
 	 * to notice the new frequency limits */

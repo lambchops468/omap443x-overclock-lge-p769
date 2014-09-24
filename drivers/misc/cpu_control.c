@@ -81,6 +81,8 @@ static char performance_governor[CPUFREQ_NAME_LEN] = "performance";
 #define BUF_SIZE PAGE_SIZE
 static char *buf;
 
+static struct *kobject cpucontrol_kobj;
+
 static int set_cpufreq_policy(char str_governor[CPUFREQ_NAME_LEN],
 		unsigned int min_freq,
 		unsigned int max_freq) {
@@ -174,54 +176,50 @@ static int set_one_opp(unsigned int index, unsigned int freq, unsigned int volt)
 	def_ft[index].opp->rate = freq;
 }
 
-/* sysfs please. */
-/*  proc fs */
-static int proc_gpu_cpu_speed(char *buffer, char **buffer_location, off_t offset, int count, int *eof, void *data) {
-	int ret = 0;
-	if (offset > 0)
-		ret = 0;
-	else
-		ret += scnprintf(buffer+ret, count-ret,"CPU : %lu Mhz\nGPU : %lu Mhz\n", clk_get_rate(mpu_clk)/1000000, clk_get_rate(gpu_clk)/1000000);
+/*  sysfs */
+static int cur_freq_show(struct kobject *kobj, struct kobj_attribute *attr,
+		char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "CPU : %lu Mhz\nGPU : %lu Mhz\n",
+			clk_get_rate(mpu_clk)/1000000,
+			clk_get_rate(gpu_clk)/1000000);
+}
+
+static int cpu_def_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
+		char *buf) {
+	int i, ret;
+
+	ret = scnprintf(buffer, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
+	for(i = 0; i < mpu_opp_count; i++) {
+		ret += scnprintf(buffer+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
+			def_ft[i].index,
+			def_ft[i].rate/1000000,
+			def_ft[i].u_volt/1000);
+	}
+
 	return ret;
 }
 
-static int proc_mpu_opp_def(char *buffer, char **buffer_location, off_t offset, int count, int *eof, void *data) {
-	int i, ret = 0;
+static int cpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
+		char *buf) {
+	int i, ret;
 
-	if (offset > 0)
-		ret = 0;
-	else
-		ret += scnprintf(buffer+ret, count-ret, "Id\tFreq\tVolt(mV)\n");
-		for(i = 0;i <mpu_opp_count; i++) {
-			ret += scnprintf(buffer+ret, count-ret, "%d\t%lu\t%lu\n", def_ft[i].index, def_ft[i].rate/1000000, def_ft[i].u_volt/1000);
-		}
+	ret = scnprintf(buffer, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
+	for(i = 0; i < mpu_opp_count; i++) {
+		ret += scnprintf(buffer+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
+			def_ft[i].index,
+			def_ft[i].opp->rate/1000000,
+			def_ft[i].opp->u_volt/1000);
+	}
+
 	return ret;
 }
 
-static int proc_mpu_opp_cur(char *buffer, char **buffer_location, off_t offset, int count, int *eof, void *data) {
-	int i, ret = 0;
-
-	if (offset > 0)
-		ret = 0;
-	else
-		ret += scnprintf(buffer+ret, count-ret, "Id\tFreq\tVolt(mV)\n");
-		for(i = 0;i <mpu_opp_count; i++) {
-			ret += scnprintf(buffer+ret, count-ret, "%d\t%lu\t%lu\n", def_ft[i].index, def_ft[i].opp->rate/1000000, def_ft[i].opp->u_volt/1000);
-		}
-	return ret;
-}
-
-static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned long len, void *data) {
+static int cpu_tweak_opp_store(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf, size_t count) {
 	unsigned int id;
 	unsigned int freq; //in KHz
 	unsigned int volt; //in mV
-	if(!len || len >= BUF_SIZE)
-		return -ENOSPC;
 
-	if(copy_from_user(buf, buffer, len))
-		return -EFAULT;
-
-	buf[len] = 0;
 	if(sscanf(buf, "%u %u %u", &id, &freq, &volt) == 3) {
 		freq = freq * 1000; /* convert from MHz to KHz */
 
@@ -255,10 +253,34 @@ static int proc_cpu_tweak(struct file *filp, const char __user *buffer, unsigned
 		prepare_opp_modify();
 		set_one_opp(id, freq*1000, volt*1000);
 		finish_opp_modify();
+	} else {
+		return -EINVAL;
 	}
-	return len;
+	return count;
 }
-/* proc fs end */
+
+static struct kobj_attribute cur_freq_attr =
+	__ATTR(cur_freq, S_IRUGO, cur_freq_show, NULL);
+static struct kobj_attribute cpu_cur_opp_attr =
+	__ATTR(cpu_cur_opp, S_IRUGO, cpu_cur_opp_show, NULL);
+static struct kobj_attribute cpu_default_opp_attr =
+	__ATTR(cpu_default_opp, S_IRUGO, cpu_default_opp_show, NULL);
+static struct kobj_attribute cpu_tweak_opp_attr =
+	__ATTR(cpu_tweak_opp, S_IWUSR, NULL, cpu_tweak_opp_store);
+
+static struct attribute *attrs[] = {
+	&cur_freq_attr.attr,
+	&cpu_cur_opp_attr.attr,
+	&cpu_default_opp.attr,
+	&cpu_tweak_opp.attr,
+	NULL
+};
+
+static struct attribute_group attr_group = {
+	.attrs = attrs,
+};
+
+/* sysfs end */
 
 static int __init populate_def_freq_table() {
 	unsigned long freq;
@@ -406,7 +428,7 @@ static int __init cpu_control_init(void) {
 	}
 
 	ret = populate_def_freq_table()
-        if (!ret)
+        if (ret)
 		goto err_free_def_ft;
 
 		
@@ -417,18 +439,28 @@ static int __init cpu_control_init(void) {
 		goto err_free_def_ft;
 	}
 
-	proc_mkdir("cpu_control", NULL);
-	proc_entry = create_proc_read_entry("cpu_control/frequency_current", 0444, NULL, proc_gpu_cpu_speed, NULL);
-	proc_entry = create_proc_read_entry("cpu_control/opp_table_current", 0444, NULL, proc_mpu_opp_cur, NULL);
-	proc_entry = create_proc_read_entry("cpu_control/opp_table_default", 0444, NULL, proc_mpu_opp_def, NULL);
-	proc_entry = create_proc_read_entry("cpu_control/tweak_cpu", 0644, NULL, NULL, NULL);
-	proc_entry->write_proc = proc_cpu_tweak;
+	/* Create a new sysfs directory under /sys/devices/system/cpu */
+	cpucontrol_kobj = kobject_create_and_add("cpucontrol", &cpu_sysdev_class.kset.kobj);
+	if (!cpucontrol_kobj) {
+		pr_err("cpu-control: %s: Unable to allocate new kobject\n", __func__);
+		goto err_free_buf;
+	}
+
+	ret = sysfs_create_group(cpucontrol_kobj, &attr_group);
+	if (ret) {
+		pr_err("cpu-control: %s: Unable to create sysfs attributes\n", __func__);
+		goto err_put_kobj;
+	}
 
 	gpu_opp = opp_find_freq_floor_s(gpu_dev, &freq);
 	pr_info("cpu-control : GPU Default max value : %lu mV : %lu\n", gpu_opp->u_volt/1000, gpu_opp->rate/1000);
 
 	return 0;
 
+err_put_kobj:
+	kobject_put(cpucontrol_kobj);
+err_free_buf:
+	vfree(buf);
 err_free_def_ft:
 	kfree(def_ft);
 err_cpu_put:
@@ -439,11 +471,10 @@ err_out:
 
 static void __exit cpu_control_exit(void){
 	pr_info("cpu_control : Reset opp table to default.\n");
-	remove_proc_entry("cpu_control/frequency_current", NULL);
-	remove_proc_entry("cpu_control/opp_table_current", NULL);
-	remove_proc_entry("cpu_control/opp_table_default", NULL);
-	remove_proc_entry("cpu_control/tweak_cpu", NULL);
-	remove_proc_entry("cpu_control", NULL);
+
+	/* This will also remove the sysfs entries */
+	kobject_put(cpucontrol_kobj);
+
 	vfree(buf);
 
 	prepare_opp_modify();

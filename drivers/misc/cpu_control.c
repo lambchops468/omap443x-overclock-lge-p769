@@ -151,6 +151,8 @@ static int finish_opp_modify() {
 	policy->cpuinfo.min_freq = policy->user_policy.min = min_freq_new;
 	policy->cpuinfo.max_freq = policy->user_policy.max = max_freq_new;
 
+	//TODO: update max_freq
+
 	/* This will cause the governor, even if the same governor,
 	 * to notice the new frequency limits */
 	set_cpufreq_policy(prev_governor,
@@ -248,6 +250,8 @@ static int cpu_tweak_opp_store(struct kobject *kobj,
 			volt = MPU_MIN_UVOLT/1000;
 		}
 
+		//TODO: check freq against clock
+
 		pr_info("cpu-control : Change operating point : %lu %lu Mhz %lu mV\n", id, freq/1000, volt);
 
 		prepare_opp_modify();
@@ -342,7 +346,7 @@ static int __init cpu_control_init(void) {
 
 	pr_info("cpu-control : Hello world!\n");
 
-	// todo: ensure this cpu is omap443x
+	// TODO: ensure this cpu is omap443x
 
 	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct mutex*, omap_cpufreq_lock, omap_cpufreq_lock_p);

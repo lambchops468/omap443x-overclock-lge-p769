@@ -121,22 +121,6 @@
 /* arch/arm/mach-omap2/control.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(u32, omap_ctrl_readl_s, u16 offset);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(void, omap_ctrl_writel_s, u32 val, u16 offset);
-/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
-#include <linux/cpufreq.h>
-static struct cpufreq_frequency_table **freq_table_p = NULL;
-static bool *omap_cpufreq_ready_p = NULL;
-static bool *omap_cpufreq_suspended_p = NULL;
-static struct mutex *omap_cpufreq_lock_p = NULL;
-static unsigned int *max_thermal_freq_p = NULL;
-static unsigned int *max_freq_p = NULL;
-static unsigned int *current_target_freq_p = NULL;
-
-SYMSEARCH_DECLARE_FUNCTION_STATIC(void, omap_thermal_throttle_s, void);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(void, omap_thermal_unthrottle_s, void);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned int, omap_getspeed_s,
-	unsigned int cpu);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned int, omap_cpufreq_scale_s,
-	unsigned int target_freq, unsigned int cur_freq);
 /* arch/arm/plat-omap/omap_device.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_device*, omap_device_build_s,
 	const char *pdev_name, int pdev_id, struct omap_hwmod *oh, void *pdata,
@@ -234,12 +218,18 @@ struct omap_temp_sensor {
 	int is_efuse_valid;
 	u8 clk_on;
 	unsigned long clk_rate;
+
 	struct mutex throttle_lock;
 	int throttle_cold;
 	int throttle_hot;
 	int throttling;
 	u8 attempting_cool;
+
 	struct delayed_work throttle_work;
+
+	unsigned int throttle_freq;
+	struct cpufreq_frequency_table *freq_table;
+	struct cpufreq_policy *cpufreq_policy;
 };
 
 /*
@@ -387,55 +377,113 @@ static bool schedule_throttle_work(struct omap_temp_sensor *temp_sensor,
 			msecs_to_jiffies(delay_ms));
 }
 
-/**
- * Find the next highest frequency that the CPU should run at
+/* Find the next lowest frequency lower than freq. Capable of handling the case
+ * where freq is no longer in the frequency table.
  */
-static unsigned int omap_thermal_raise_speed(void)
+static unsigned int cpufreq_next_lower_freq(
+		struct cpufreq_frequency_table *freq_table,
+		unsigned int freq)
 {
-	unsigned int candidate = *max_freq_p;
-	unsigned int curr;
 	int i;
+	
+	unsigned int candidate = 0;
+	unsigned int lowest = ~0;
 
-	curr = *max_thermal_freq_p;
+	for (i = 0; freq_table[i].frequency != CPUFREQ_TABLE_END; i++) {
+		if (freq_table[i].frequency > candidate &&
+				freq_table[i].frequency < freq)
+			candidate = freq_table[i].frequency;
+		if (freq_table[i].frequency < lowest)
+			lowest = freq_table[i].frequency;
+	}
 
-	for (i = 0; (*freq_table_p)[i].frequency != CPUFREQ_TABLE_END; i++)
-		if ((*freq_table_p)[i].frequency < candidate &&
-		    (*freq_table_p)[i].frequency > curr)
-			candidate = (*freq_table_p)[i].frequency;
-
-	return candidate;
+	if (candidate == 0)
+		return lowest;
+	else
+		return candidate;
 }
 
-/**
- * Unthrottle the CPU frequency step-wise (in contrast to
- * omap_thermal_unthrottle_s(), which would set the CPU to maximum frequency)
+/* Find the next lowest frequency higher than freq. Capable of handling the case
+ * where freq is no longer in the frequency table.
  */
-static void omap_thermal_unthrottle_step(void)
+static unsigned int cpufreq_next_higher_freq(
+		struct cpufreq_frequency_table *freq_table,
+		unsigned int freq)
 {
-	unsigned int cur;
+	int i;
+	
+	unsigned int candidate = ~0;
+	unsigned int highest = 0;
+	for (i = 0; freq_table[i].frequency != CPUFREQ_TABLE_END; i++) {
+		if (freq_table[i].frequency < candidate &&
+				freq_table[i].frequency > freq)
+			candidate = freq_table[i].frequency;
+		if (freq_table[i].frequency > highest)
+			highest = freq_table[i].frequency;
+	}
 
-	if (!*omap_cpufreq_ready_p)
-		return;
+	if (candidate == ~0)
+		return highest;
+	else
+		return candidate;
+}
 
-	mutex_lock(omap_cpufreq_lock_p);
+static unsigned int cpufreq_get_max_freq(struct cpufreq_policy *policy)
+{
+	unsigned int freq;
 
-	if (*max_thermal_freq_p == *max_freq_p) {
-		pr_warn("%s: not throttling\n", __func__);
+	lock_policy_rwsem_read(policy->cpu);
+
+	freq = policy->cpuinfo.max_freq;
+
+	unlock_policy_rwsem_read(policy->cpu);
+
+	return freq;
+}
+
+static int omap_rethrottle_cpu(struct omap_temp_sensor *temp_sensor,
+		bool throttle)
+{
+	struct cpufreq_policy new_policy;
+	struct cpufreq_policy *policy = temp_sensor->cpufreq_policy;
+	struct cpufreq_frequency_table *freq_table = temp_sensor->freq_table;
+	unsigned int new_freq;
+	int ret = 0;
+
+	lock_policy_rwsem_write(policy->cpu);
+
+	ret = cpufreq_get_policy(&new_policy, policy->cpu);
+	if (ret)
+		goto out;
+
+	/* Derive new throttle frequency from new_policy.max,
+	 * which takes into account the user's max and the
+	 * cpuinfo.max */
+	if (throttle)
+		new_freq = cpufreq_next_lower_freq(freq_table,
+				new_policy.max);
+	else
+		new_freq = cpufreq_next_higher_freq(freq_table,
+				new_policy.max);
+	
+	/* If we can't do anything, bail and tell the caller */
+	if (new_freq == new_policy.cpuinfo.max_freq) {
+		ret = 1;
 		goto out;
 	}
 
-	*max_thermal_freq_p = omap_thermal_raise_speed();
+	new_policy.cpuinfo.max_freq = new_freq;
+	temp_sensor->throttle_freq = new_freq;
 
-	pr_warn("%s: temperature reduced, cpu unthrottling at max %u\n",
-		__func__, *max_thermal_freq_p);
+	ret = __cpufreq_set_policy_s(policy, &new_policy);
 
-	if (!*omap_cpufreq_suspended_p) {
-		cur = omap_getspeed_s(0);
-		omap_cpufreq_scale_s(*current_target_freq_p, cur);
-	}
+	policy->user_policy.policy = policy->policy;
+	policy->user_policy.governor = policy->governor;
 
 out:
-	mutex_unlock(omap_cpufreq_lock_p);
+	unlock_policy_rwsem_write(policy->cpu);
+
+	return ret;
 }
 
 /*
@@ -636,7 +684,7 @@ out:
  */
 static void throttle_delayed_work_fn(struct work_struct *work)
 {
-	int curr;
+	int curr, ret;
 	struct omap_temp_sensor *temp_sensor =
 				container_of(work, struct omap_temp_sensor,
 					     throttle_work.work);
@@ -646,20 +694,40 @@ static void throttle_delayed_work_fn(struct work_struct *work)
 	if ((curr >= temp_sensor->throttle_hot && temp_sensor->attempting_cool == 0) ||
 	    (curr > temp_sensor->throttle_hot && temp_sensor->attempting_cool == 1) ||
 	    curr < 0) {
-		pr_warn("%s: OMAP temp read %d exceeds hot threshold, throttling\n",
-			__func__, curr);
+
 		temp_sensor->throttling++;
 		temp_sensor->attempting_cool = 1;
-		omap_thermal_throttle_s();
+		ret = omap_rethrottle_cpu(temp_sensor, true);
+		if (ret < 0) {
+			pr_err("%s: OMAP temp read %d exceeds hot threshold,"
+				"but could not throttle: %d"
+				__func__, curr, ret);
+			goto out;
+		}
+		pr_info("%s: OMAP temp read %d exceeds hot threshold, throttling"
+			"at %lu MHz\n",
+			__func__, curr, temp_sensor->throttle_freq/1000);
+
 	} else if (temp_sensor->throttling > 0 &&
 		   ((curr <= temp_sensor->throttle_cold && temp_sensor->attempting_cool == 1) ||
 		    (curr <  temp_sensor->throttle_cold && temp_sensor->attempting_cool == 0))) {
-		pr_info("%s: OMAP temp read %d below cold threshold, unthrottling\n",
-			__func__, curr);
+
 		temp_sensor->throttling--;
 		temp_sensor->attempting_cool = 0;
-		omap_thermal_unthrottle_step();
+		ret = omap_rethrottle_cpu(temp_sensor, false);
+		if (ret < 0) {
+			pr_err("%s: OMAP temp read %d below cold threshold,"
+				"but could not unthrottle: %d"
+				__func__, curr, ret);
+			goto out;
+		}
+
+		pr_info("%s: OMAP temp read %d below cold threshold, unthrottling"
+			"at %lu MHz\n",
+			__func__, curr, temp_sensor->throttle_freq/1000);
 	}
+
+out:
 	schedule_throttle_work(temp_sensor, curr);
 	mutex_unlock(&temp_sensor->throttle_lock);
 }
@@ -709,6 +777,27 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	spin_lock_init(&temp_sensor->lock);
+
+	if (auto_throttle) {
+		/* Get some cpufreq stuff for throttling purposes */
+		/* cpufreq_cpu_get() should only be done on CPU0 (the boot cpu).
+		 * For other CPUs, the policy is destroyed/created on cpu
+		 * hotplug (which happens during suspend). cpufreq_cpu_get()
+		 * gets the omap2plus-cpufreq module  */
+		temp_sensor->cpufreq_policy = cpufreq_cpu_get(0);
+		if (!temp_sensor->cpufreq_policy) {
+			dev_err("%s:No cpufreq driver\n", __func__);
+			return -EINVAL;
+			goto cpufreq_get_err;
+		}
+
+		temp_sensor->freq_table = cpufreq_frequency_get_table(0);
+		if (!freq_table) {
+			dev_err("%s:No cpufreq driver\n", __func__);
+			ret = -EINVAL;
+			goto freq_table_err;
+		}
+	}
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!mem) {
@@ -790,6 +879,8 @@ static int __devinit omap_temp_sensor_probe(struct platform_device *pdev)
 	if (auto_throttle) {
 		temp_sensor->throttle_cold = THROTTLE_COLD;
 		temp_sensor->throttle_hot = THROTTLE_HOT;
+		temp_sensor->throttle_freq = 
+			cpufreq_get_max_freq(temp_sensor->cpufreq_policy);
 		schedule_throttle_work(temp_sensor, curr);
 		/* Enable the sysfs throttle threshold control file */
 		omap_temp_sensor_attributes[THROTTLE_ATTR_INDEX] =
@@ -825,6 +916,10 @@ get_tshut_irq_err:
 	if (temp_sensor->tshut_irq > 0)
 		gpio_free(OMAP_TSHUT_GPIO);
 plat_res_err:
+freq_table_err:
+	if (temp_sensor->cpufreq_policy)
+		cpufreq_cpu_put(temp_sensor->cpufreq_policy);
+cpufreq_get_err:
 	kfree(temp_sensor);
 	return ret;
 }
@@ -980,21 +1075,6 @@ int __init omap_temp_sensor_init(void)
 	/* arch/arm/mach-omap2/control.c */
 	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_ctrl_readl, omap_ctrl_readl_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_ctrl_writel, omap_ctrl_writel_s);
-	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
-	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_thermal_throttle, omap_thermal_throttle_s);
-	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_thermal_unthrottle, omap_thermal_unthrottle_s);
-	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_getspeed, omap_getspeed_s);
-	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_cpufreq_scale, omap_cpufreq_scale_s);
-
-	/* freq_table and max_freq are popular symbol names in the kernel! But we get lucky and the
-	 * kernel only has one example of each symbol (see System.map after compilation) */
-	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct cpufreq_frequency_table**, freq_table, freq_table_p);
-	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, bool*, omap_cpufreq_ready, omap_cpufreq_ready_p);
-	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, bool*, omap_cpufreq_suspended, omap_cpufreq_suspended_p);
-	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct mutex*, omap_cpufreq_lock, omap_cpufreq_lock_p);
-	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, unsigned int*, max_thermal, max_thermal_freq_p);
-	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, unsigned int*, max_freq, max_freq_p);
-	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, unsigned int*, current_target_freq, current_target_freq_p);
 	/* arch/arm/plat-omap/omap_device.c */
 	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_device_build, omap_device_build_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, omap_device_enable_hwmods, omap_device_enable_hwmods_s);

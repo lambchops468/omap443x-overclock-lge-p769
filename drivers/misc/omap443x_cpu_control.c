@@ -115,9 +115,15 @@ static int set_cpufreq_governor(char str_governor[CPUFREQ_NAME_LEN]) {
 }
 
 static int prepare_opp_modify() {
+	int ret = 0;
+
 	/* Lock the core cpufreq policy. The same policy object and lock exists
 	 * for CPU0 and CPU1 because they are both related */
-	lock_policy_rwsem_write(policy->cpu);
+	if(lock_policy_rwsem_write(policy->cpu) < 0) {
+		ret = -ENODEV;
+		return ret;
+	}
+
 
 	/* change governor to performance. When this returns, we will have
 	 * transistioned to the fastest frequency. Since the performance
@@ -128,8 +134,12 @@ static int prepare_opp_modify() {
 	pr_info("cpu-control : Current cpufreq gov : %s\n", policy->governor->name);
 	strncpy(prev_governor, policy->governor->name, CPUFREQ_NAME_LEN);
 	if (strnicmp(policy->governor->name, performance_governor, CPUFREQ_NAME_LEN)) {
-		set_cpufreq_governor(performance_governor);
 		pr_info("cpu-control : Change cpufreq gov : %s\n", policy->governor->name);
+		ret = set_cpufreq_governor(performance_governor);
+		if (ret) {
+			pr_err("cpu-control : Could not set cpufreq governor\n");
+			goto out_err;
+		}
 	}
 
 	/* Stop the omap2plus-cpufreq driver from trying to change frequency -
@@ -139,9 +149,17 @@ static int prepare_opp_modify() {
 	/* Take this lock to prevent dvfs from attempting to use the opp
 	 * being modified (this might occur during cross-domain changes)  */
 	mutex_lock(&omap_dvfs_lock);
+
+	return 0;
+
+out_err:
+	unlock_policy_rwsem_write(policy->cpu);
+	return ret;
 }
 
 static int finish_opp_modify() {
+	int ret;
+
 	unsigned int min_freq_new = freq_table[0].frequency;
 	unsigned int max_freq_new = freq_table[mpu_opp_count-1].frequency;
 
@@ -155,23 +173,29 @@ static int finish_opp_modify() {
 	policy->cpuinfo.min_freq = policy->user_policy.min = min_freq_new;
 	policy->cpuinfo.max_freq = policy->user_policy.max = max_freq_new;
 
+	pr_info("cpu_control : Reset cpufreq gov : %s\n", policy->governor->name);
 	/* This will cause the governor, even if the same governor,
 	 * to notice the new frequency limits */
-	set_cpufreq_policy(prev_governor,
+	ret = set_cpufreq_policy(prev_governor,
 			freq_table[0].frequency,
 			freq_table[mpu_opp_count-1].frequency);
-	pr_info("cpu_control : Reset cpufreq gov : %s\n", policy->governor->name);
+
+	if (ret) {
+		pr_err("cpu-control : Could not set cpufreq governor\n");
+	}
 
 	/* change governor back to whatever it was before we started */
 	/* set appropriate min/max too */
 	unlock_policy_rwsem_write(policy->cpu);
+
+	return ret;
 }
 
 /*
  * Freq in Hz
  * Volt in uV
  */
-static int set_one_opp(unsigned int index, unsigned int freq, unsigned int volt) {
+static void set_one_opp(unsigned int index, unsigned int freq, unsigned int volt) {
 	freq_table[index].frequency = freq/1000;
 	mpu_vdd->volt_data[index].volt_nominal = volt;
 	// this is wrong. wrong. wrong. all. wrong.
@@ -223,6 +247,7 @@ static int cpu_tweak_opp_store(struct kobject *kobj,
 	unsigned int id;
 	unsigned int freq; //in KHz
 	unsigned int volt; //in mV
+	int ret;
 
 	if(sscanf(buf, "%u %u %u", &id, &freq, &volt) != 3) {
 		return -EINVAL
@@ -264,9 +289,15 @@ static int cpu_tweak_opp_store(struct kobject *kobj,
 	pr_info("cpu-control : Change operating point : %lu %lu Mhz %lu mV\n",
 			id, freq/1000000, volt);
 
-	prepare_opp_modify();
+	ret = prepare_opp_modify();
+	if (ret)
+		return ret;
+
 	set_one_opp(id, freq, volt*1000);
-	finish_opp_modify();
+
+	ret = finish_opp_modify();
+	if (ret)
+		return ret;
 
 	return count;
 }
@@ -357,7 +388,7 @@ static int __init cpu_control_init(void) {
 	if (!cpu_is_omap443x()) {
 		pr_err("cpu-control: CPU is not OMAP443x\n");
 		return 0;
-        }
+	}
 
 	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct mutex*, omap_cpufreq_lock, omap_cpufreq_lock_p);
@@ -443,10 +474,10 @@ static int __init cpu_control_init(void) {
 	}
 
 	ret = populate_def_freq_table()
-        if (ret)
-		goto err_free_def_ft;
+		if (ret)
+			goto err_free_def_ft;
 
-		
+
 	buf = (char *)vmalloc(BUF_SIZE);
 	if (!buf) {
 		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
@@ -492,10 +523,15 @@ static void __exit cpu_control_exit(void){
 
 	vfree(buf);
 
-	prepare_opp_modify();
+	ret = prepare_opp_modify();
+	if (ret)
+		goto out;
+
 	restore_def_freq_table();
+
 	finish_opp_modify();
 
+out:
 	kfree(def_ft);
 
 	cpufreq_cpu_put(policy);

@@ -43,9 +43,11 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(struct opp *, opp_find_freq_floor_s,
 		struct device *dev, unsigned long *freq);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct opp *, opp_find_freq_ceil_s,
 		struct device *dev, unsigned long *freq);
+
 /* arch/arm/mach-omap2/voltage.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct voltagedomain *, voltdm_lookup_s,
 		char *name);
+
 /* drivers/cpufreq/cpufreq.c */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, __cpufreq_set_policy_s,
 		struct cpufreq_policy *data, struct cpufreq_policy *policy);
@@ -53,6 +55,9 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(int, cpufreq_parse_governor_s,
 		char *str_governor, unsigned int *policy, struct cpufreq_governor **governor);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, lock_policy_rwsem_write_s, int cpu);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(void, unlock_policy_rwsem_write_s, int cpu);
+
+/* arch/arm/mach-omap2/dvfs.c */
+struct mutex *omap_dvfs_lock_p;
 
 
 struct opp {
@@ -78,7 +83,6 @@ static struct cpufreq_policy *policy;
 static struct device *mpu_dev, *gpu_dev;
 static struct omap_vdd_info *mpu_vdd;
 static struct clk *mpu_clk, *gpu_clk;
-extern struct mutex omap_dvfs_lock;
 static struct opp_table *def_ft;
 
 static int mpu_opp_count;
@@ -152,7 +156,7 @@ static int prepare_opp_modify(void) {
 	mutex_lock(omap_cpufreq_lock_p);
 	/* Take this lock to prevent dvfs from attempting to use the opp
 	 * being modified (this might occur during cross-domain changes)  */
-	mutex_lock(&omap_dvfs_lock);
+	mutex_lock(omap_dvfs_lock_p);
 
 	return 0;
 
@@ -167,7 +171,7 @@ static int finish_opp_modify(void) {
 	unsigned int min_freq_new = freq_table[0].frequency;
 	unsigned int max_freq_new = freq_table[mpu_opp_count-1].frequency;
 
-	mutex_unlock(&omap_dvfs_lock);
+	mutex_unlock(omap_dvfs_lock_p);
 
 	/* Update omap2plus-cpufreq */
 	*max_freq_p = max_freq_new;
@@ -398,7 +402,6 @@ static int __init cpu_control_init(void) {
 	/* freq_table and max_freq are popular symbol names in the kernel!
 	 * But we get lucky and the kernel only has one example of each
 	 * symbol (see System.map after compilation) */
-
 	SYMSEARCH_BIND_POINTER_TO(omap443x_cpu_control, struct mutex*, omap_cpufreq_lock, omap_cpufreq_lock_p);
 	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, unsigned int*, max_freq, max_freq_p);
 
@@ -417,6 +420,9 @@ static int __init cpu_control_init(void) {
 	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, unlock_policy_rwsem_write, unlock_policy_rwsem_write_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, __cpufreq_set_policy, __cpufreq_set_policy_s);
 	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, cpufreq_parse_governor, cpufreq_parse_governor_s);
+
+	/* arch/arm/mach-omap2/dvfs.c */
+	SYMSEARCH_BIND_POINTER_TO(omap443x_cpu_control, struct mutex*, omap_dvfs_lock, omap_dvfs_lock_p);
 
 	/* cpufreq_cpu_get() should only be done on CPU0 (the boot cpu). For other
 	 * CPUs, the policy is destroyed/created on cpu hotplug (which happens during

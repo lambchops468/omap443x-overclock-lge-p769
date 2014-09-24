@@ -354,7 +354,10 @@ static int __init cpu_control_init(void) {
 
 	pr_info("cpu-control : Hello world!\n");
 
-	// TODO: ensure this cpu is omap443x
+	if (!cpu_is_omap443x()) {
+		pr_err("cpu-control: CPU is not OMAP443x\n");
+		return 0;
+        }
 
 	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct mutex*, omap_cpufreq_lock, omap_cpufreq_lock_p);

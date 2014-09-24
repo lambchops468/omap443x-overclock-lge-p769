@@ -224,44 +224,50 @@ static int cpu_tweak_opp_store(struct kobject *kobj,
 	unsigned int freq; //in KHz
 	unsigned int volt; //in mV
 
-	if(sscanf(buf, "%u %u %u", &id, &freq, &volt) == 3) {
-		freq = freq * 1000; /* convert from MHz to KHz */
+	if(sscanf(buf, "%u %u %u", &id, &freq, &volt) != 3) {
+		return -EINVAL
+	}
 
-		if (id > mpu_opp_count-1) {
-			pr_err("cpu-control : wrong cpu opp id @ %u", id);
-			return -EINVAL;
-		}
+	freq = freq * 1000000; /* convert from MHz to Hz */
 
-		if (id > 0 && freq_table[id-1].frequency >= freq) {
-			pr_err("cpu-control : Frequency is not above previous OPP's frequency");
-			return -EINVAL;
-		}
-
-		if (id < mpu_opp_count-1 && freq_table[id+1].frequency <= freq) {
-			pr_err("cpu-control : Frequency is not below next OPP's frequency");
-			return -EINVAL;
-		}
-
-		if (volt > MPU_MAX_UVOLT/1000) {
-			pr_info("cpu-control : Too high voltage, limiting to %lu", MPU_MAX_UVOLT/1000);
-			volt = MPU_MAX_UVOLT/1000;
-		}
-
-		if (volt < MPU_MIN_UVOLT/1000) {
-			pr_info("cpu-control : Too low voltage, limiting to %lu", MPU_MIN_UVOLT/1000);
-			volt = MPU_MIN_UVOLT/1000;
-		}
-
-		//TODO: check freq against clock
-
-		pr_info("cpu-control : Change operating point : %lu %lu Mhz %lu mV\n", id, freq/1000, volt);
-
-		prepare_opp_modify();
-		set_one_opp(id, freq*1000, volt*1000);
-		finish_opp_modify();
-	} else {
+	if (id > mpu_opp_count-1) {
+		pr_err("cpu-control : wrong cpu opp id @ %u", id);
 		return -EINVAL;
 	}
+
+	if (id > 0 && freq_table[id-1].frequency >= freq/1000) {
+		pr_err("cpu-control : Frequency is not above previous OPP's frequency");
+		return -EINVAL;
+	}
+
+	if (id < mpu_opp_count-1 && freq_table[id+1].frequency <= freq/1000) {
+		pr_err("cpu-control : Frequency is not below next OPP's frequency");
+		return -EINVAL;
+	}
+
+	freq = clk_round_rate(mpu_clk, freq);
+	if (freq <= 0) {
+		pr_err("cpu-control : Frequency could not be rounded");
+		return -EINVAL;
+	}
+
+	if (volt > MPU_MAX_UVOLT/1000) {
+		pr_info("cpu-control : Too high voltage, limiting to %lu", MPU_MAX_UVOLT/1000);
+		volt = MPU_MAX_UVOLT/1000;
+	}
+
+	if (volt < MPU_MIN_UVOLT/1000) {
+		pr_info("cpu-control : Too low voltage, limiting to %lu", MPU_MIN_UVOLT/1000);
+		volt = MPU_MIN_UVOLT/1000;
+	}
+
+	pr_info("cpu-control : Change operating point : %lu %lu Mhz %lu mV\n",
+			id, freq/1000000, volt);
+
+	prepare_opp_modify();
+	set_one_opp(id, freq, volt*1000);
+	finish_opp_modify();
+
 	return count;
 }
 

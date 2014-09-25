@@ -258,6 +258,7 @@ static void finish_gpu_opp_modify(void) {
 static void set_one_mpu_opp(unsigned int index, unsigned int freq, unsigned int volt) {
 	freq_table[index].frequency = freq/1000;
 	mpu_vdd->volt_data[index].volt_nominal = volt;
+	mpu_vdd->dep_vdd_info[0].dep_table[index].main_vdd_volt = volt;
 	mpu_def_ft[index].opp->u_volt = volt;
 	mpu_def_ft[index].opp->rate = freq;
 }

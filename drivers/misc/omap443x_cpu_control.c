@@ -108,7 +108,7 @@ static struct omap_volt_data *omap443x_vdd_core_volt_data_extra;
 static int vdd_core_volt_data_count;
 /* Based off of omap446x_vdd_core_volt_data[2]. */
 static struct omap_volt_data gpu_extra_volt_data =
-	VOLT_DATA_DEFINE(0, 0, OMAP44XX_CONTROL_FUSE_CORE_OPP100OV, 0xf9, 0x16, OMAP_ABB_NONE);
+	VOLT_DATA_DEFINE(0, 0, OMAP44XX_CONTROL_FUSE_CORE_OPP100, 0xf9, 0x16, OMAP_ABB_NONE);
 
 /* A replacement for cpufreq_parse_governor().
  * For some reason the above function does not exist in the symbol tables.

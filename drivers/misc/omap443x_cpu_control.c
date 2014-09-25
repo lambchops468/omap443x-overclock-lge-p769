@@ -84,7 +84,7 @@ static struct cpufreq_policy *policy;
 static struct device *mpu_dev, *gpu_dev;
 static struct omap_vdd_info *mpu_vdd;
 static struct clk *mpu_clk, *gpu_clk;
-static struct opp_table *def_ft;
+static struct opp_table *mpu_def_ft;
 
 static int mpu_opp_count;
 static char prev_governor[CPUFREQ_NAME_LEN];
@@ -243,8 +243,8 @@ static void set_one_opp(unsigned int index, unsigned int freq, unsigned int volt
 	mpu_vdd->volt_data[index].volt_nominal = volt;
 	// this is wrong. wrong. wrong. all. wrong.
 	mpu_vdd->dep_vdd_info[0].dep_table[index].main_vdd_volt = volt;
-	def_ft[index].opp->u_volt = volt;
-	def_ft[index].opp->rate = freq;
+	mpu_def_ft[index].opp->u_volt = volt;
+	mpu_def_ft[index].opp->rate = freq;
 }
 
 /*  sysfs */
@@ -262,9 +262,9 @@ static ssize_t cpu_default_opp_show(struct kobject *kobj,
 	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
 	for(i = 0; i < mpu_opp_count; i++) {
 		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t\t%lu\n",
-			def_ft[i].index,
-			def_ft[i].rate/1000000,
-			def_ft[i].u_volt/1000);
+			mpu_def_ft[i].index,
+			mpu_def_ft[i].rate/1000000,
+			mpu_def_ft[i].u_volt/1000);
 	}
 
 	return ret;
@@ -277,9 +277,9 @@ static ssize_t cpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *att
 	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
 	for(i = 0; i < mpu_opp_count; i++) {
 		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
-			def_ft[i].index,
-			def_ft[i].opp->rate/1000000,
-			def_ft[i].opp->u_volt/1000);
+			mpu_def_ft[i].index,
+			mpu_def_ft[i].opp->rate/1000000,
+			mpu_def_ft[i].opp->u_volt/1000);
 	}
 
 	return ret;
@@ -390,22 +390,22 @@ static int __init populate_def_freq_table(void) {
 	 */
 	rcu_read_lock();
 	for(i = 0; i<mpu_opp_count; i++) {
-		def_ft[i].index = i;
+		mpu_def_ft[i].index = i;
 
 		freq = (freq_table[i].frequency-1000) * 1000;
 
-		def_ft[i].opp = opp_find_freq_ceil_s(mpu_dev, &freq);
-		if (IS_ERR(def_ft[i].opp)) {
+		mpu_def_ft[i].opp = opp_find_freq_ceil_s(mpu_dev, &freq);
+		if (IS_ERR(mpu_def_ft[i].opp)) {
 			pr_err("cpu-control: %s: Unable to retrieve OPP\n", __func__);
 			ret = -EINVAL;
 			goto out;
 		}
 		
-		def_ft[i].rate = def_ft[i].opp->rate;
-		def_ft[i].u_volt = def_ft[i].opp->u_volt;
+		mpu_def_ft[i].rate = mpu_def_ft[i].opp->rate;
+		mpu_def_ft[i].u_volt = mpu_def_ft[i].opp->u_volt;
 
-		pr_info("Map %d : %lu Mhz : %lu mV\n", def_ft[i].index,
-				def_ft[i].rate/1000000, def_ft[i].u_volt/1000);
+		pr_info("Map %d : %lu Mhz : %lu mV\n", mpu_def_ft[i].index,
+				mpu_def_ft[i].rate/1000000, mpu_def_ft[i].u_volt/1000);
 	}
 out:
 	rcu_read_unlock();
@@ -416,7 +416,7 @@ out:
 static void __exit restore_def_freq_table(void) {
 	int i;
 	for(i = 0; i < mpu_opp_count; i++) {
-		set_one_opp(i, def_ft[i].rate, def_ft[i].u_volt);
+		set_one_opp(i, mpu_def_ft[i].rate, mpu_def_ft[i].u_volt);
 	}
 }
 
@@ -519,8 +519,8 @@ static int __init cpu_control_init(void) {
 		goto err_cpu_put;
 	}
 
-	def_ft = kzalloc(sizeof(struct opp_table) * (mpu_opp_count), GFP_KERNEL);
-	if (!def_ft) {
+	mpu_def_ft = kzalloc(sizeof(struct opp_table) * (mpu_opp_count), GFP_KERNEL);
+	if (!mpu_def_ft) {
 		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
 		ret = -ENOMEM;
 		goto err_cpu_put;
@@ -528,14 +528,14 @@ static int __init cpu_control_init(void) {
 
 	ret = populate_def_freq_table();
 	if (ret)
-		goto err_free_def_ft;
+		goto err_free_mpu_def_ft;
 
 
 	/* Create a new sysfs directory under /sys/devices/system/cpu */
 	cpucontrol_kobj = kobject_create_and_add("cpucontrol", &cpu_sysdev_class.kset.kobj);
 	if (!cpucontrol_kobj) {
 		pr_err("cpu-control: %s: Unable to allocate new kobject\n", __func__);
-		goto err_free_def_ft;
+		goto err_free_mpu_def_ft;
 	}
 
 	ret = sysfs_create_group(cpucontrol_kobj, &attr_group);
@@ -551,8 +551,8 @@ static int __init cpu_control_init(void) {
 
 err_put_kobj:
 	kobject_put(cpucontrol_kobj);
-err_free_def_ft:
-	kfree(def_ft);
+err_free_mpu_def_ft:
+	kfree(mpu_def_ft);
 err_cpu_put:
 	cpufreq_cpu_put(policy);
 err_out:
@@ -576,7 +576,7 @@ static void __exit cpu_control_exit(void){
 	finish_opp_modify();
 
 out:
-	kfree(def_ft);
+	kfree(mpu_def_ft);
 
 	cpufreq_cpu_put(policy);
 

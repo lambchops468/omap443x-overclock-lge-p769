@@ -446,9 +446,9 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 		return -EINVAL;
 	}
 
-	if (id > 0 && volt*1000 <= gpu_vdd->volt_data[vdd_core_volt_data_count-3].volt_nominal) {
+	if (id > 0 && volt*1000 < omap443x_vdd_core_volt_data_p[vdd_core_volt_data_count-2].volt_nominal) {
 		pr_info("cpu-control : Too low voltage, must be above %u",
-				gpu_vdd->volt_data[vdd_core_volt_data_count-3].volt_nominal/1000);
+			omap443x_vdd_core_volt_data_p[vdd_core_volt_data_count-2].volt_nominal/1000);
 		return -EINVAL;
 	}
 
@@ -463,10 +463,15 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 
 	prepare_gpu_opp_modify();
 
-	volt_data = &omap443x_vdd_core_volt_data_extra[vdd_core_volt_data_count-2];
-	*volt_data = gpu_extra_volt_data;
-	volt_data->volt_nominal = volt*1000;
-	gpu_vdd->volt_data = omap443x_vdd_core_volt_data_extra;
+	/* Extra voltage slot not required */
+	if (volt*1000 == omap443x_vdd_core_volt_data_p[vdd_core_volt_data_count-2].volt_nominal) {
+		gpu_vdd->volt_data = omap443x_vdd_core_volt_data_p;
+	} else {
+		volt_data = &omap443x_vdd_core_volt_data_extra[vdd_core_volt_data_count-2];
+		*volt_data = gpu_extra_volt_data;
+		volt_data->volt_nominal = volt*1000;
+		gpu_vdd->volt_data = omap443x_vdd_core_volt_data_extra;
+	}
 
 	set_one_gpu_opp(id, freq, volt*1000);
 	finish_gpu_opp_modify();

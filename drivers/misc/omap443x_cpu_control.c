@@ -605,7 +605,6 @@ static int __init count_def_gpu_volt_table(void) {
 
 
 static int __init cpu_control_init(void) {
-	struct opp *gpu_opp;
 	struct voltagedomain *mpu_voltdm, *gpu_voltdm;
 	int ret;
 	unsigned long freq = ULONG_MAX;
@@ -772,9 +771,6 @@ static int __init cpu_control_init(void) {
 		pr_err("cpu-control: %s: Unable to create sysfs attributes\n", __func__);
 		goto err_put_kobj;
 	}
-
-	gpu_opp = opp_find_freq_floor_s(gpu_dev, &freq);
-	pr_info("cpu-control : GPU Default max value : %lu mV : %lu\n", gpu_opp->u_volt/1000, gpu_opp->rate/1000);
 
 	return 0;
 

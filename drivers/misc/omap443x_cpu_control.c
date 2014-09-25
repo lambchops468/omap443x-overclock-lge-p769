@@ -697,7 +697,7 @@ static int __init cpu_control_init(void) {
 	if (ret)
 		goto err_free_mpu_def_ft;
 
-	gpu_clk = clk_get(NULL, "gpu_fck");
+	gpu_clk = clk_get(NULL, "dpll_per_m7x2_ck");
 	if (IS_ERR(gpu_clk)) {
 		pr_err("%s:Unable to get gpu_clk\n", __func__);
 		ret = -ENODEV;

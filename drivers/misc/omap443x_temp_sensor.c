@@ -711,12 +711,12 @@ static void throttle_delayed_work_fn(struct work_struct *work)
 		temp_sensor->attempting_cool = 1;
 		ret = omap_rethrottle_cpu(temp_sensor, true);
 		if (ret < 0) {
-			pr_err("%s: OMAP temp read %d exceeds hot threshold,"
+			pr_err("%s: OMAP temp read %d exceeds hot threshold, "
 				"but could not throttle: %d",
 				__func__, curr, ret);
 			goto out;
 		}
-		pr_info("%s: OMAP temp read %d exceeds hot threshold, throttling"
+		pr_info("%s: OMAP temp read %d exceeds hot threshold, throttling "
 			"at %u MHz\n",
 			__func__, curr, temp_sensor->throttle_freq/1000);
 
@@ -728,13 +728,13 @@ static void throttle_delayed_work_fn(struct work_struct *work)
 		temp_sensor->attempting_cool = 0;
 		ret = omap_rethrottle_cpu(temp_sensor, false);
 		if (ret < 0) {
-			pr_err("%s: OMAP temp read %d below cold threshold,"
+			pr_err("%s: OMAP temp read %d below cold threshold, "
 				"but could not unthrottle: %d",
 				__func__, curr, ret);
 			goto out;
 		}
 
-		pr_info("%s: OMAP temp read %d below cold threshold, unthrottling"
+		pr_info("%s: OMAP temp read %d below cold threshold, unthrottling "
 			"at %u MHz\n",
 			__func__, curr, temp_sensor->throttle_freq/1000);
 	}

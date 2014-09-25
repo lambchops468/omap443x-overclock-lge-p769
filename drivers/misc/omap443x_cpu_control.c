@@ -24,6 +24,8 @@
 #include <plat/common.h>
 
 #include "../../../arch/arm/mach-omap2/voltage.h"
+#include "../../../arch/arm/mach-omap2/control.h"
+#include "../../../arch/arm/mach-omap2/omap_opp_data.h"
 #include "symsearch/symsearch.h"
 
 #define MPU_MAX_UVOLT 1415000
@@ -69,7 +71,6 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(struct cpufreq_governor*, __find_governor_s,
 /* arch/arm/mach-omap2/dvfs.c */
 static struct mutex *omap_dvfs_lock_p;
 
-
 struct opp {
 	char *hwmod_name;
 	char *voltdm_name;
@@ -101,11 +102,12 @@ static char performance_governor[CPUFREQ_NAME_LEN] = "performance";
 
 static struct kobject *cpucontrol_kobj;
 
+static struct omap_volt_data *omap443x_vdd_core_volt_data;
 /* Core Volt data for supporting higher voltages for the GPU */
-struct omap_volt_data *omap443x_vdd_core_volt_data_extra;
-int vdd_core_volt_data_count;
+static struct omap_volt_data *omap443x_vdd_core_volt_data_extra;
+static int vdd_core_volt_data_count;
 /* Based off of omap446x_vdd_core_volt_data[2]. */
-struct omap_volt_data gpu_extra_volt_data =
+static struct omap_volt_data gpu_extra_volt_data =
 	VOLT_DATA_DEFINE(0, 0, OMAP44XX_CONTROL_FUSE_CORE_OPP100OV, 0xf9, 0x16, OMAP_ABB_NONE);
 
 /* A replacement for cpufreq_parse_governor().
@@ -461,9 +463,9 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 
 	prepare_gpu_opp_modify();
 
-	volt_data = omap443x_vdd_core_volt_data_extra[vdd_core_volt_data_count-2];
+	volt_data = &omap443x_vdd_core_volt_data_extra[vdd_core_volt_data_count-2];
 	*volt_data = gpu_extra_volt_data;
-	volt_data.volt_nominal = volt*1000;
+	volt_data->volt_nominal = volt*1000;
 	gpu_vdd->volt_data = omap443x_vdd_core_volt_data_extra;
 
 	set_one_gpu_opp(id, freq, volt*1000);
@@ -740,6 +742,7 @@ static int __init cpu_control_init(void) {
 	if (ret)
 		goto err_free_gpu_def_ft;
 	
+	omap443x_vdd_core_volt_data = gpu_vdd->volt_data;
 	/* Allocate a new omap443x_vdd_core_volt_data with an extra slot,
 	 * and a slot for the terminator  */
 	vdd_core_volt_data_count = count_def_gpu_volt_table() + 2;

@@ -457,28 +457,33 @@ static int omap_rethrottle_cpu(struct omap_temp_sensor *temp_sensor,
 	if (lock_policy_rwsem_write_s(policy->cpu) < 0)
 		return -ENODEV;
 
-	ret = cpufreq_get_policy(&new_policy, policy->cpu);
-	if (ret)
-		goto out;
-
 	/* Derive new throttle frequency from new_policy.max,
 	 * which takes into account the user's max and the
 	 * cpuinfo.max */
 	if (throttle)
 		new_freq = cpufreq_next_lower_freq(freq_table,
-				new_policy.max);
+				policy->max);
 	else
 		new_freq = cpufreq_next_higher_freq(freq_table,
-				new_policy.max);
+				policy->max);
 	
 	/* If we can't do anything, bail and tell the caller */
-	if (new_freq == new_policy.cpuinfo.max_freq) {
+	if (new_freq == policy->cpuinfo.max_freq) {
 		ret = 1;
 		goto out;
 	}
 
-	new_policy.cpuinfo.max_freq = new_freq;
+	/* Cannot set new_policy.cpuinfo.max_freq because policy->cpuinfo will
+	 * be copied into new_policy.cpuinfo by __cpufreq_set_policy()
+	 */
+	policy->cpuinfo.max_freq = new_freq;
 	temp_sensor->throttle_freq = new_freq;
+
+	/* new_policy only serves to be a placeholder argument for
+	 * __cpufreq_set_policy() */
+	ret = cpufreq_get_policy(&new_policy, policy->cpu);
+	if (ret)
+		goto out;
 
 	ret = __cpufreq_set_policy_s(policy, &new_policy);
 

@@ -552,6 +552,8 @@ static int __init populate_def_gpu_freq_table(void) {
 		gpu_def_ft[i].rate = gpu_def_ft[i].opp->rate;
 		gpu_def_ft[i].u_volt = gpu_def_ft[i].opp->u_volt;
 
+		freq += 1;
+
 		pr_info("GPU Map %d : %lu Mhz : %lu mV\n", gpu_def_ft[i].index,
 				gpu_def_ft[i].rate/1000000, gpu_def_ft[i].u_volt/1000);
 	}

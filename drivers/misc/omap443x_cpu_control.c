@@ -102,7 +102,7 @@ static char performance_governor[CPUFREQ_NAME_LEN] = "performance";
 
 static struct kobject *cpucontrol_kobj;
 
-static struct omap_volt_data *omap443x_vdd_core_volt_data;
+static struct omap_volt_data *omap443x_vdd_core_volt_data_p;
 /* Core Volt data for supporting higher voltages for the GPU */
 static struct omap_volt_data *omap443x_vdd_core_volt_data_extra;
 static int vdd_core_volt_data_count;
@@ -594,7 +594,7 @@ static void __exit restore_def_gpu_freq_table(void) {
 		set_one_gpu_opp(i, gpu_def_ft[i].rate, gpu_def_ft[i].u_volt);
 	}
 
-	gpu_vdd->volt_data = omap443x_vdd_core_volt_data;
+	gpu_vdd->volt_data = omap443x_vdd_core_volt_data_p;
 }
 
 static int __init count_def_gpu_volt_table(void) {
@@ -742,7 +742,7 @@ static int __init cpu_control_init(void) {
 	if (ret)
 		goto err_free_gpu_def_ft;
 	
-	omap443x_vdd_core_volt_data = gpu_vdd->volt_data;
+	omap443x_vdd_core_volt_data_p = gpu_vdd->volt_data;
 	/* Allocate a new omap443x_vdd_core_volt_data with an extra slot,
 	 * and a slot for the terminator  */
 	vdd_core_volt_data_count = count_def_gpu_volt_table() + 2;
@@ -756,7 +756,7 @@ static int __init cpu_control_init(void) {
 		goto err_free_gpu_def_ft;
 	}
 	/* Copy over default entries */
-	memcpy(omap443x_vdd_core_volt_data_extra, omap443x_vdd_core_volt_data,
+	memcpy(omap443x_vdd_core_volt_data_extra, omap443x_vdd_core_volt_data_p,
 			sizeof(struct omap_volt_data) * (vdd_core_volt_data_count-2));
 
 

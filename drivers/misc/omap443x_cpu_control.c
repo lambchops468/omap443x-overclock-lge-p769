@@ -446,9 +446,9 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 		return -EINVAL;
 	}
 
-	if (id > 0 && volt <= gpu_vdd->volt_data[vdd_core_volt_data_count-3].volt_nominal) {
+	if (id > 0 && volt*1000 <= gpu_vdd->volt_data[vdd_core_volt_data_count-3].volt_nominal) {
 		pr_info("cpu-control : Too low voltage, must be above %u",
-				gpu_vdd->volt_data[vdd_core_volt_data_count-3].volt_nominal);
+				gpu_vdd->volt_data[vdd_core_volt_data_count-3].volt_nominal/1000);
 		return -EINVAL;
 	}
 

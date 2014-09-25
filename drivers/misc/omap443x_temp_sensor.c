@@ -476,7 +476,8 @@ static int omap_rethrottle_cpu(struct omap_temp_sensor *temp_sensor,
 	/* Cannot set new_policy.cpuinfo.max_freq because policy->cpuinfo will
 	 * be copied into new_policy.cpuinfo by __cpufreq_set_policy()
 	 */
-	policy->cpuinfo.max_freq = new_freq;
+	policy->cpuinfo.max_freq = policy->max =
+		policy->user_policy.max = new_freq;
 	temp_sensor->throttle_freq = new_freq;
 
 	/* new_policy only serves to be a placeholder argument for

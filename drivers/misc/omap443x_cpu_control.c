@@ -29,6 +29,15 @@
 #define MPU_MAX_UVOLT 1415000
 #define MPU_MIN_UVOLT 830000
 
+#define GPU_MAX_UVOLT 830000
+/* Note: OMAP4460 uses 1250000 to reach 384 MHz. See
+ * OMAP4460_VP_CORE_VLIMITTO_VDDMAX
+ *
+ * Motorola's sources indicate 1200000 for "OMAP4"
+ * (those sources are probably for OMAP4430 only)
+ */
+#define GPU_MIN_UVOLT 1250000
+
 /* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 static struct mutex *omap_cpufreq_lock_p = NULL;
 static unsigned int *max_freq_p = NULL;
@@ -82,11 +91,11 @@ struct opp_table {
 static struct cpufreq_frequency_table *freq_table;
 static struct cpufreq_policy *policy;
 static struct device *mpu_dev, *gpu_dev;
-static struct omap_vdd_info *mpu_vdd;
+static struct omap_vdd_info *mpu_vdd, *gpu_vdd;
 static struct clk *mpu_clk, *gpu_clk;
-static struct opp_table *mpu_def_ft;
+static struct opp_table *mpu_def_ft, *gpu_def_ft;
+static int mpu_opp_count, gpu_opp_count;
 
-static int mpu_opp_count;
 static char prev_governor[CPUFREQ_NAME_LEN];
 static char performance_governor[CPUFREQ_NAME_LEN] = "performance";
 
@@ -157,7 +166,7 @@ static int set_cpufreq_governor(char str_governor[CPUFREQ_NAME_LEN]) {
 	return set_cpufreq_policy(str_governor, policy->min, policy->max);
 }
 
-static int prepare_opp_modify(void) {
+static int prepare_mpu_opp_modify(void) {
 	int ret = 0;
 
 	/* Lock the core cpufreq policy. The same policy object and lock exists
@@ -200,7 +209,7 @@ out_err:
 	return ret;
 }
 
-static int finish_opp_modify(void) {
+static int finish_mpu_opp_modify(void) {
 	int ret;
 
 	unsigned int min_freq_new = freq_table[0].frequency;
@@ -234,15 +243,29 @@ static int finish_opp_modify(void) {
 	return ret;
 }
 
+static void prepare_gpu_opp_modify(void) {
+	mutex_lock(omap_dvfs_lock_p);
+}
+
+static void finish_gpu_opp_modify(void) {
+	mutex_unlock(omap_dvfs_lock_p);
+}
+
 /*
  * Freq in Hz
  * Volt in uV
  */
-static void set_one_opp(unsigned int index, unsigned int freq, unsigned int volt) {
+static void set_one_mpu_opp(unsigned int index, unsigned int freq, unsigned int volt) {
 	freq_table[index].frequency = freq/1000;
 	mpu_vdd->volt_data[index].volt_nominal = volt;
 	mpu_def_ft[index].opp->u_volt = volt;
 	mpu_def_ft[index].opp->rate = freq;
+}
+
+static void set_one_gpu_opp(unsigned int index, unsigned int freq, unsigned int volt) {
+	gpu_vdd->volt_data[index].volt_nominal = volt;
+	gpu_def_ft[index].opp->u_volt = volt;
+	gpu_def_ft[index].opp->rate = freq;
 }
 
 /*  sysfs */
@@ -268,6 +291,21 @@ static ssize_t cpu_default_opp_show(struct kobject *kobj,
 	return ret;
 }
 
+static ssize_t gpu_default_opp_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf) {
+	int i, ret;
+
+	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
+	for(i = 0; i < gpu_opp_count; i++) {
+		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t\t%lu\n",
+			gpu_def_ft[i].index,
+			gpu_def_ft[i].rate/1000000,
+			gpu_def_ft[i].u_volt/1000);
+	}
+
+	return ret;
+}
+
 static ssize_t cpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
 		char *buf) {
 	int i, ret;
@@ -278,6 +316,21 @@ static ssize_t cpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *att
 			mpu_def_ft[i].index,
 			mpu_def_ft[i].opp->rate/1000000,
 			mpu_def_ft[i].opp->u_volt/1000);
+	}
+
+	return ret;
+}
+
+static ssize_t gpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *attr,
+		char *buf) {
+	int i, ret;
+
+	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
+	for(i = 0; i < gpu_opp_count; i++) {
+		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
+			gpu_def_ft[i].index,
+			gpu_def_ft[i].opp->rate/1000000,
+			gpu_def_ft[i].opp->u_volt/1000);
 	}
 
 	return ret;
@@ -327,18 +380,71 @@ static ssize_t cpu_tweak_opp_store(struct kobject *kobj,
 		volt = MPU_MIN_UVOLT/1000;
 	}
 
-	pr_info("cpu-control : Change operating point : %u %u Mhz %u mV\n",
+	pr_info("cpu-control : Change CPU operating point : %u %u Mhz %u mV\n",
 			id, freq/1000000, volt);
 
-	ret = prepare_opp_modify();
+	ret = prepare_mpu_opp_modify();
 	if (ret)
 		return ret;
 
-	set_one_opp(id, freq, volt*1000);
+	set_one_mpu_opp(id, freq, volt*1000);
 
-	ret = finish_opp_modify();
+	ret = finish_mpu_opp_modify();
 	if (ret)
 		return ret;
+
+	return count;
+}
+
+static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count) {
+	unsigned int id;
+	unsigned int freq; //in KHz
+	unsigned int volt; //in mV
+
+	if(sscanf(buf, "%u %u %u", &id, &freq, &volt) != 3) {
+		return -EINVAL;
+	}
+
+	freq = freq * 1000000; /* convert from MHz to Hz */
+
+	if (id > gpu_opp_count-1) {
+		pr_err("cpu-control : wrong cpu opp id @ %u", id);
+		return -EINVAL;
+	}
+
+	if (id > 0 && freq_table[id-1].frequency >= freq/1000) {
+		pr_err("cpu-control : Frequency is not above previous OPP's frequency");
+		return -EINVAL;
+	}
+
+	if (id < gpu_opp_count-1 && freq_table[id+1].frequency <= freq/1000) {
+		pr_err("cpu-control : Frequency is not below next OPP's frequency");
+		return -EINVAL;
+	}
+
+	freq = clk_round_rate(gpu_clk, freq);
+	if (freq <= 0) {
+		pr_err("cpu-control : Frequency could not be rounded");
+		return -EINVAL;
+	}
+
+	if (volt > GPU_MAX_UVOLT/1000) {
+		pr_info("cpu-control : Too high voltage, limiting to %u", GPU_MAX_UVOLT/1000);
+		volt = GPU_MAX_UVOLT/1000;
+	}
+
+	if (volt < GPU_MIN_UVOLT/1000) {
+		pr_info("cpu-control : Too low voltage, limiting to %u", GPU_MIN_UVOLT/1000);
+		volt = GPU_MIN_UVOLT/1000;
+	}
+
+	pr_info("cpu-control : Change GPU operating point : %u %u Mhz %u mV\n",
+			id, freq/1000000, volt);
+
+	prepare_gpu_opp_modify();
+	set_one_gpu_opp(id, freq, volt*1000);
+	finish_mpu_opp_modify();
 
 	return count;
 }
@@ -351,12 +457,21 @@ static struct kobj_attribute cpu_default_opp_attr =
 	__ATTR(cpu_default_opp, S_IRUGO, cpu_default_opp_show, NULL);
 static struct kobj_attribute cpu_tweak_opp_attr =
 	__ATTR(cpu_tweak_opp, S_IWUSR, NULL, cpu_tweak_opp_store);
+static struct kobj_attribute gpu_cur_opp_attr =
+	__ATTR(gpu_cur_opp, S_IRUGO, gpu_cur_opp_show, NULL);
+static struct kobj_attribute gpu_default_opp_attr =
+	__ATTR(gpu_default_opp, S_IRUGO, gpu_default_opp_show, NULL);
+static struct kobj_attribute gpu_tweak_opp_attr =
+	__ATTR(gpu_tweak_opp, S_IWUSR, NULL, gpu_tweak_opp_store);
 
 static struct attribute *attrs[] = {
 	&cur_freq_attr.attr,
 	&cpu_cur_opp_attr.attr,
 	&cpu_default_opp_attr.attr,
 	&cpu_tweak_opp_attr.attr,
+	&gpu_cur_opp_attr.attr,
+	&gpu_default_opp_attr.attr,
+	&gpu_tweak_opp_attr.attr,
 	NULL
 };
 
@@ -366,7 +481,7 @@ static struct attribute_group attr_group = {
 
 /* sysfs end */
 
-static int __init populate_def_freq_table(void) {
+static int __init populate_def_mpu_freq_table(void) {
 	unsigned long freq;
 	int ret = 0;
 	int i;
@@ -402,7 +517,7 @@ static int __init populate_def_freq_table(void) {
 		mpu_def_ft[i].rate = mpu_def_ft[i].opp->rate;
 		mpu_def_ft[i].u_volt = mpu_def_ft[i].opp->u_volt;
 
-		pr_info("Map %d : %lu Mhz : %lu mV\n", mpu_def_ft[i].index,
+		pr_info("CPU Map %d : %lu Mhz : %lu mV\n", mpu_def_ft[i].index,
 				mpu_def_ft[i].rate/1000000, mpu_def_ft[i].u_volt/1000);
 	}
 out:
@@ -411,16 +526,52 @@ out:
 	return ret;
 }
 
-static void __exit restore_def_freq_table(void) {
+static void __exit restore_def_mpu_freq_table(void) {
 	int i;
 	for(i = 0; i < mpu_opp_count; i++) {
-		set_one_opp(i, mpu_def_ft[i].rate, mpu_def_ft[i].u_volt);
+		set_one_mpu_opp(i, mpu_def_ft[i].rate, mpu_def_ft[i].u_volt);
 	}
 }
 
+static int __init populate_def_gpu_freq_table(void) {
+	unsigned long freq = 0;
+	int ret = 0;
+	int i;
+
+	rcu_read_lock();
+	for(i = 0; i<gpu_opp_count; i++) {
+		gpu_def_ft[i].index = i;
+
+		gpu_def_ft[i].opp = opp_find_freq_ceil_s(gpu_dev, &freq);
+		if (IS_ERR(gpu_def_ft[i].opp)) {
+			pr_err("cpu-control: %s: Unable to retrieve OPP\n", __func__);
+			ret = -EINVAL;
+			goto out;
+		}
+		
+		gpu_def_ft[i].rate = gpu_def_ft[i].opp->rate;
+		gpu_def_ft[i].u_volt = gpu_def_ft[i].opp->u_volt;
+
+		pr_info("GPU Map %d : %lu Mhz : %lu mV\n", gpu_def_ft[i].index,
+				gpu_def_ft[i].rate/1000000, gpu_def_ft[i].u_volt/1000);
+	}
+out:
+	rcu_read_unlock();
+
+	return ret;
+}
+
+static void __exit restore_def_gpu_freq_table(void) {
+	int i;
+	for(i = 0; i < gpu_opp_count; i++) {
+		set_one_gpu_opp(i, gpu_def_ft[i].rate, gpu_def_ft[i].u_volt);
+	}
+}
+
+
 static int __init cpu_control_init(void) {
 	struct opp *gpu_opp;
-	struct voltagedomain *mpu_voltdm;
+	struct voltagedomain *mpu_voltdm, *gpu_voltdm;
 	int ret;
 	unsigned long freq = ULONG_MAX;
 
@@ -496,24 +647,11 @@ static int __init cpu_control_init(void) {
 		ret = -ENODEV;
 		goto err_cpu_put;
 	}
+
 	mpu_opp_count = opp_get_opp_count_s(mpu_dev);
 	if (mpu_opp_count <= 0) {
 		pr_err("cpu-control: %s: Could not get opp count for mpu\n", __func__);
 		ret = -EINVAL;
-		goto err_cpu_put;
-	}
-
-	gpu_clk = clk_get(NULL, "gpu_fck");
-	if (IS_ERR(gpu_clk)) {
-		pr_err("%s:Unable to get gpu_clk\n", __func__);
-		ret = -ENODEV;
-		goto err_cpu_put;
-	}
-
-	gpu_dev = omap_hwmod_name_get_dev("gpu");
-	if (!gpu_dev || IS_ERR(gpu_dev)) {
-		pr_err("cpu-control: %s: Unable to get gpu device\n", __func__);
-		ret = -ENODEV;
 		goto err_cpu_put;
 	}
 
@@ -524,16 +662,56 @@ static int __init cpu_control_init(void) {
 		goto err_cpu_put;
 	}
 
-	ret = populate_def_freq_table();
+	ret = populate_def_mpu_freq_table();
 	if (ret)
 		goto err_free_mpu_def_ft;
 
+	gpu_clk = clk_get(NULL, "gpu_fck");
+	if (IS_ERR(gpu_clk)) {
+		pr_err("%s:Unable to get gpu_clk\n", __func__);
+		ret = -ENODEV;
+		goto err_free_mpu_def_ft;
+	}
+
+	/* GPU is on core voltage domain */
+	gpu_voltdm = voltdm_lookup_s("core");
+	if (!gpu_voltdm || IS_ERR(gpu_voltdm)) {
+		pr_err("cpu-control: %s: Unable to get gpu voltage domain\n", __func__);
+		ret = -ENODEV;
+		goto err_free_mpu_def_ft;
+	}
+	gpu_vdd = gpu_voltdm->vdd;
+
+	gpu_dev = omap_hwmod_name_get_dev("gpu");
+	if (!gpu_dev || IS_ERR(gpu_dev)) {
+		pr_err("cpu-control: %s: Unable to get gpu device\n", __func__);
+		ret = -ENODEV;
+		goto err_free_mpu_def_ft;
+	}
+
+	gpu_opp_count = opp_get_opp_count_s(gpu_dev);
+	if (gpu_opp_count <= 0) {
+		pr_err("cpu-control: %s: Could not get opp count for gpu\n", __func__);
+		ret = -EINVAL;
+		goto err_free_mpu_def_ft;
+	}
+
+	gpu_def_ft = kzalloc(sizeof(struct opp_table) * (gpu_opp_count), GFP_KERNEL);
+	if (!gpu_def_ft) {
+		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
+		ret = -ENOMEM;
+		goto err_free_mpu_def_ft;
+	}
+
+	ret = populate_def_gpu_freq_table();
+	if (ret)
+		goto err_free_gpu_def_ft;
 
 	/* Create a new sysfs directory under /sys/devices/system/cpu */
 	cpucontrol_kobj = kobject_create_and_add("cpucontrol", &cpu_sysdev_class.kset.kobj);
 	if (!cpucontrol_kobj) {
 		pr_err("cpu-control: %s: Unable to allocate new kobject\n", __func__);
-		goto err_free_mpu_def_ft;
+		goto err_free_gpu_def_ft;
 	}
 
 	ret = sysfs_create_group(cpucontrol_kobj, &attr_group);
@@ -549,6 +727,8 @@ static int __init cpu_control_init(void) {
 
 err_put_kobj:
 	kobject_put(cpucontrol_kobj);
+err_free_gpu_def_ft:
+	kfree(gpu_def_ft);
 err_free_mpu_def_ft:
 	kfree(mpu_def_ft);
 err_cpu_put:
@@ -565,15 +745,21 @@ static void __exit cpu_control_exit(void){
 	/* This will also remove the sysfs entries */
 	kobject_put(cpucontrol_kobj);
 
-	ret = prepare_opp_modify();
+	prepare_gpu_opp_modify();
+	restore_def_gpu_freq_table();
+	finish_gpu_opp_modify();
+
+
+	ret = prepare_mpu_opp_modify();
 	if (ret)
 		goto out;
 
-	restore_def_freq_table();
+	restore_def_mpu_freq_table();
 
-	finish_opp_modify();
+	finish_mpu_opp_modify();
 
 out:
+	kfree(gpu_def_ft);
 	kfree(mpu_def_ft);
 
 	cpufreq_cpu_put(policy);

@@ -469,7 +469,7 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 	gpu_vdd->volt_data = omap443x_vdd_core_volt_data_extra;
 
 	set_one_gpu_opp(id, freq, volt*1000);
-	finish_mpu_opp_modify();
+	finish_gpu_opp_modify();
 
 	return count;
 }

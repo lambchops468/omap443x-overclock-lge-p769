@@ -251,6 +251,8 @@ static int finish_mpu_opp_modify(void) {
 }
 
 static void prepare_gpu_opp_modify(void) {
+	/* The PowerVR SGX driver directly calls omap_device_scale_gpu(),
+	 * so taking this lock is sufficient */
 	mutex_lock(omap_dvfs_lock_p);
 }
 

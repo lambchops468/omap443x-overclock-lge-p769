@@ -612,7 +612,6 @@ static int __init count_def_gpu_volt_table(void) {
 static int __init cpu_control_init(void) {
 	struct voltagedomain *mpu_voltdm, *gpu_voltdm;
 	int ret;
-	unsigned long freq = ULONG_MAX;
 
 	pr_info("cpu-control : Hello world!\n");
 

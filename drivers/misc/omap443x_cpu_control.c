@@ -319,7 +319,7 @@ static ssize_t cpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *att
 
 	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
 	for(i = 0; i < mpu_opp_count; i++) {
-		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
+		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t\t%lu\n",
 			mpu_def_ft[i].index,
 			mpu_def_ft[i].opp->rate/1000000,
 			mpu_def_ft[i].opp->u_volt/1000);
@@ -334,7 +334,7 @@ static ssize_t gpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *att
 
 	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
 	for(i = 0; i < gpu_opp_count; i++) {
-		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t%lu\n",
+		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t\t%lu\n",
 			gpu_def_ft[i].index,
 			gpu_def_ft[i].opp->rate/1000000,
 			gpu_def_ft[i].opp->u_volt/1000);

@@ -101,6 +101,13 @@ static char performance_governor[CPUFREQ_NAME_LEN] = "performance";
 
 static struct kobject *cpucontrol_kobj;
 
+/* Core Volt data for supporting higher voltages for the GPU */
+struct omap_volt_data *omap443x_vdd_core_volt_data_extra;
+int vdd_core_volt_data_count;
+/* Based off of omap446x_vdd_core_volt_data[2]. */
+struct omap_volt_data gpu_extra_volt_data =
+	VOLT_DATA_DEFINE(0, 0, OMAP44XX_CONTROL_FUSE_CORE_OPP100OV, 0xf9, 0x16, OMAP_ABB_NONE);
+
 /* A replacement for cpufreq_parse_governor().
  * For some reason the above function does not exist in the symbol tables.
  * (it was probably inlined...)
@@ -264,7 +271,6 @@ static void set_one_mpu_opp(unsigned int index, unsigned int freq, unsigned int 
 }
 
 static void set_one_gpu_opp(unsigned int index, unsigned int freq, unsigned int volt) {
-	gpu_vdd->volt_data[index].volt_nominal = volt;
 	gpu_def_ft[index].opp->u_volt = volt;
 	gpu_def_ft[index].opp->rate = freq;
 }
@@ -402,6 +408,7 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 	unsigned int id;
 	unsigned int freq; //in KHz
 	unsigned int volt; //in mV
+	struct omap_volt_data *volt_data;
 
 	if(sscanf(buf, "%u %u %u", &id, &freq, &volt) != 3) {
 		return -EINVAL;
@@ -409,18 +416,23 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 
 	freq = freq * 1000000; /* convert from MHz to Hz */
 
-	if (id > gpu_opp_count-1) {
-		pr_err("cpu-control : wrong cpu opp id @ %u", id);
+	/* For now we only support modification of the fastest OPP because we
+	 * need to add a new slot to the voltage info for the CORE voltage
+	 * domain, and we only support a single additional voltage. We cannot
+	 * modify existing voltages because other devices require those existing
+	 * voltages to be present in the table. Those devices will ask for
+	 * OMAP4430_VDD_CORE_OPP100_UV or OMAP4430_VDD_CORE_OPP50_UV (see
+	 * omap443x_opp_def_list in arch/arm/mach-omap2/opp4xxx_data.c). If we
+	 * tried to modify the nominal voltages in omap443x_vdd_core_volt_data,
+	 * these voltages would not be able to be used and the voltage system
+	 * will throw errors. */
+	if (id != gpu_opp_count-1) {
+		pr_err("cpu-control : can only modify fastest opp for GPU\n");
 		return -EINVAL;
 	}
 
-	if (id > 0 && freq_table[id-1].frequency >= freq/1000) {
+	if (id > 0 && gpu_def_ft[id-1].opp->rate >= freq) {
 		pr_err("cpu-control : Frequency is not above previous OPP's frequency");
-		return -EINVAL;
-	}
-
-	if (id < gpu_opp_count-1 && freq_table[id+1].frequency <= freq/1000) {
-		pr_err("cpu-control : Frequency is not below next OPP's frequency");
 		return -EINVAL;
 	}
 
@@ -430,20 +442,28 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 		return -EINVAL;
 	}
 
+	if (id > 0 && volt <= gpu_vdd->volt_data[vdd_core_volt_data_count-3].volt_nominal) {
+		pr_info("cpu-control : Too low voltage, must be above %u",
+				gpu_vdd->volt_data[vdd_core_volt_data_count-3].volt_nominal);
+		return -EINVAL;
+	}
+
 	if (volt > GPU_MAX_UVOLT/1000) {
 		pr_info("cpu-control : Too high voltage, limiting to %u", GPU_MAX_UVOLT/1000);
 		volt = GPU_MAX_UVOLT/1000;
 	}
 
-	if (volt < GPU_MIN_UVOLT/1000) {
-		pr_info("cpu-control : Too low voltage, limiting to %u", GPU_MIN_UVOLT/1000);
-		volt = GPU_MIN_UVOLT/1000;
-	}
-
 	pr_info("cpu-control : Change GPU operating point : %u %u Mhz %u mV\n",
 			id, freq/1000000, volt);
 
+
 	prepare_gpu_opp_modify();
+
+	volt_data = omap443x_vdd_core_volt_data_extra[vdd_core_volt_data_count-2];
+	*volt_data = gpu_extra_volt_data;
+	volt_data.volt_nominal = volt*1000;
+	gpu_vdd->volt_data = omap443x_vdd_core_volt_data_extra;
+
 	set_one_gpu_opp(id, freq, volt*1000);
 	finish_mpu_opp_modify();
 
@@ -569,6 +589,14 @@ static void __exit restore_def_gpu_freq_table(void) {
 	for(i = 0; i < gpu_opp_count; i++) {
 		set_one_gpu_opp(i, gpu_def_ft[i].rate, gpu_def_ft[i].u_volt);
 	}
+
+	gpu_vdd->volt_data = omap443x_vdd_core_volt_data;
+}
+
+static int __init count_def_gpu_volt_table(void) {
+	int i;
+	for(i = 0; gpu_vdd->volt_data[i].volt_nominal != 0; i++);
+	return i;
 }
 
 
@@ -709,12 +737,29 @@ static int __init cpu_control_init(void) {
 	ret = populate_def_gpu_freq_table();
 	if (ret)
 		goto err_free_gpu_def_ft;
+	
+	/* Allocate a new omap443x_vdd_core_volt_data with an extra slot,
+	 * and a slot for the terminator  */
+	vdd_core_volt_data_count = count_def_gpu_volt_table() + 2;
+	BUG_ON(vdd_core_volt_data_count < 3);
+	omap443x_vdd_core_volt_data_extra = kzalloc(
+			sizeof(struct omap_volt_data) * (vdd_core_volt_data_count),
+			GFP_KERNEL);
+	if (!omap443x_vdd_core_volt_data_extra) {
+		pr_err("cpu-control: %s: Unable to allocate memory\n", __func__);
+		ret = -ENOMEM;
+		goto err_free_gpu_def_ft;
+	}
+	/* Copy over default entries */
+	memcpy(omap443x_vdd_core_volt_data_extra, omap443x_vdd_core_volt_data,
+			sizeof(struct omap_volt_data) * (vdd_core_volt_data_count-2));
+
 
 	/* Create a new sysfs directory under /sys/devices/system/cpu */
 	cpucontrol_kobj = kobject_create_and_add("cpucontrol", &cpu_sysdev_class.kset.kobj);
 	if (!cpucontrol_kobj) {
 		pr_err("cpu-control: %s: Unable to allocate new kobject\n", __func__);
-		goto err_free_gpu_def_ft;
+		goto err_free_vdd_data;
 	}
 
 	ret = sysfs_create_group(cpucontrol_kobj, &attr_group);
@@ -730,6 +775,8 @@ static int __init cpu_control_init(void) {
 
 err_put_kobj:
 	kobject_put(cpucontrol_kobj);
+err_free_vdd_data:
+	kfree(omap443x_vdd_core_volt_data_extra);
 err_free_gpu_def_ft:
 	kfree(gpu_def_ft);
 err_free_mpu_def_ft:
@@ -762,6 +809,7 @@ static void __exit cpu_control_exit(void){
 	finish_mpu_opp_modify();
 
 out:
+	kfree(omap443x_vdd_core_volt_data_extra);
 	kfree(gpu_def_ft);
 	kfree(mpu_def_ft);
 

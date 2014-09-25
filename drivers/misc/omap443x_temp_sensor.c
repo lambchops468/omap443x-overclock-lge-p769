@@ -1115,9 +1115,11 @@ int __init omap_temp_sensor_init(void)
         omap_temp_sensor_latency[0].activate_func = omap_device_enable_hwmods_s;
 
 	if ((ret = temp_sensor_dev_init(omap443x_bandgap_hwmod_p, NULL))) {
-		pr_err("temp_sensor_dev_init() failed: %d\n", ret);
-		return ret;
-	} else if ((ret = platform_driver_register(&omap_temp_sensor_driver))) {
+		pr_err("temp_sensor_dev_init() failed: %d - Forging on! "
+			"The device might have already been registered.\n", ret);
+	}
+
+	if ((ret = platform_driver_register(&omap_temp_sensor_driver))) {
 		pr_err("platform_driver_register() failed: %d\n", ret);
                 return ret;
         } else {

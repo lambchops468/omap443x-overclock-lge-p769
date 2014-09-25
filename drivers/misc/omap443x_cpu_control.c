@@ -29,14 +29,14 @@
 #define MPU_MAX_UVOLT 1415000
 #define MPU_MIN_UVOLT 830000
 
-#define GPU_MAX_UVOLT 830000
 /* Note: OMAP4460 uses 1250000 to reach 384 MHz. See
  * OMAP4460_VP_CORE_VLIMITTO_VDDMAX
  *
  * Motorola's sources indicate 1200000 for "OMAP4"
  * (those sources are probably for OMAP4430 only)
  */
-#define GPU_MIN_UVOLT 1250000
+#define GPU_MAX_UVOLT 1250000
+#define GPU_MIN_UVOLT 830000
 
 /* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 static struct mutex *omap_cpufreq_lock_p = NULL;

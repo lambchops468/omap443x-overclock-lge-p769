@@ -365,19 +365,21 @@ static ssize_t cpu_tweak_opp_store(struct kobject *kobj,
 		return -EINVAL;
 	}
 
+	freq = clk_round_rate(mpu_clk, freq);
+	if (freq <= 0) {
+		pr_err("cpu-control : Frequency could not be rounded");
+		return -EINVAL;
+	}
+
 	if (id > 0 && freq_table[id-1].frequency >= freq/1000) {
-		pr_err("cpu-control : Frequency is not above previous OPP's frequency");
+		pr_err("cpu-control : Rounded frequency %u is not above "
+				"previous OPP's frequency", freq);
 		return -EINVAL;
 	}
 
 	if (id < mpu_opp_count-1 && freq_table[id+1].frequency <= freq/1000) {
-		pr_err("cpu-control : Frequency is not below next OPP's frequency");
-		return -EINVAL;
-	}
-
-	freq = clk_round_rate(mpu_clk, freq);
-	if (freq <= 0) {
-		pr_err("cpu-control : Frequency could not be rounded");
+		pr_err("cpu-control : Rounded frequency %u is not below "
+				"next OPP's frequency");
 		return -EINVAL;
 	}
 
@@ -435,14 +437,15 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 		return -EINVAL;
 	}
 
-	if (id > 0 && gpu_def_ft[id-1].opp->rate >= freq) {
-		pr_err("cpu-control : Frequency is not above previous OPP's frequency");
-		return -EINVAL;
-	}
-
 	freq = clk_round_rate(gpu_clk, freq);
 	if (freq <= 0) {
 		pr_err("cpu-control : Frequency could not be rounded");
+		return -EINVAL;
+	}
+
+	if (id > 0 && gpu_def_ft[id-1].opp->rate >= freq) {
+		pr_err("cpu-control : Rounded frequency %u is not above "
+				"previous OPP's frequency");
 		return -EINVAL;
 	}
 

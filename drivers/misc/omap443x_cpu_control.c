@@ -114,8 +114,8 @@ static struct omap_volt_data gpu_extra_volt_data =
 /* Protected by omap_dvfs_lock */
 static DEFINE_MUTEX(gpu_throttle_mutex);
 static bool gpu_throttling = false;
-static unsigned int gpu_oc_freq = 0;
-static unsigned int gpu_oc_uvolt = 0;
+static unsigned long gpu_oc_freq = 0;
+static unsigned long gpu_oc_uvolt = 0;
 
 /* A replacement for cpufreq_parse_governor().
  * For some reason the above function does not exist in the symbol tables.
@@ -152,9 +152,9 @@ static int cpufreq_get_governor(char *str_governor, unsigned int *policy,
 }
 
 static int set_cpufreq_policy(char str_governor[CPUFREQ_NAME_LEN],
-		unsigned int min_freq,
-		unsigned int max_freq) {
-	unsigned int ret = -EINVAL;
+		unsigned long min_freq,
+		unsigned long max_freq) {
+	int ret = -EINVAL;
 	struct cpufreq_policy new_policy;
 	if (!policy)
 		return ret;
@@ -228,8 +228,8 @@ out_err:
 static int finish_mpu_opp_modify(void) {
 	int ret;
 
-	unsigned int min_freq_new = freq_table[0].frequency;
-	unsigned int max_freq_new = freq_table[mpu_opp_count-1].frequency;
+	unsigned long min_freq_new = freq_table[0].frequency;
+	unsigned long max_freq_new = freq_table[mpu_opp_count-1].frequency;
 
 	mutex_unlock(omap_dvfs_lock_p);
 
@@ -273,7 +273,7 @@ static void finish_gpu_opp_modify(void) {
  * Freq in Hz
  * Volt in uV
  */
-static void set_one_mpu_opp(unsigned int index, unsigned int freq, unsigned int volt) {
+static void set_one_mpu_opp(int index, unsigned long freq, unsigned long volt) {
 	freq_table[index].frequency = freq/1000;
 	mpu_vdd->volt_data[index].volt_nominal = volt;
 	mpu_vdd->dep_vdd_info[0].dep_table[index].main_vdd_volt = volt;
@@ -354,8 +354,8 @@ static ssize_t gpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *att
 
 	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
 	for(i = 0; i < gpu_opp_count; i++) {
-		unsigned int freq = gpu_def_ft[i].opp->rate/1000000;
-		unsigned int volt = gpu_def_ft[i].opp->u_volt/1000;
+		unsigned long freq = gpu_def_ft[i].opp->rate/1000000;
+		unsigned long volt = gpu_def_ft[i].opp->u_volt/1000;
 
 		/* Show the OC freq and voltage, even during throttling */
 		if (gpu_def_ft[i].index == GPU_OC_OPP_IDX) {
@@ -374,18 +374,18 @@ static ssize_t gpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *att
 
 static ssize_t cpu_tweak_opp_store(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count) {
-	unsigned int id;
-	unsigned int freq; //in KHz
-	unsigned int volt; //in mV
+	int id;
+	unsigned long freq; //in KHz
+	unsigned long volt; //in mV
 	int ret;
 
-	if(sscanf(buf, "%u %u %u", &id, &freq, &volt) != 3) {
+	if(sscanf(buf, "%d %u %u", &id, &freq, &volt) != 3) {
 		return -EINVAL;
 	}
 
 	freq = freq * 1000000; /* convert from MHz to Hz */
 
-	if (id > mpu_opp_count-1) {
+	if (id > mpu_opp_count-1 || id < 0) {
 		pr_err("cpu-control : wrong cpu opp id @ %u", id);
 		return -EINVAL;
 	}
@@ -436,12 +436,12 @@ static ssize_t cpu_tweak_opp_store(struct kobject *kobj,
 
 static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count) {
-	unsigned int id;
+	int id;
 	unsigned int freq; //in KHz
 	unsigned int volt; //in mV
 	struct omap_volt_data *volt_data;
 
-	if(sscanf(buf, "%u %u %u", &id, &freq, &volt) != 3) {
+	if(sscanf(buf, "%d %u %u", &id, &freq, &volt) != 3) {
 		return -EINVAL;
 	}
 
@@ -546,7 +546,7 @@ static struct attribute_group attr_group = {
 /* sysfs end */
 
 int omap_gpu_thermal_rethrottle(bool throttle) {
-	unsigned int current_gpu_clk, target_gpu_clk, prev_target_clk;
+	unsigned long current_gpu_clk, prev_target_clk;
 	bool rescale_required;
 	struct gpu_platform_data *pdata;
 	int ret;

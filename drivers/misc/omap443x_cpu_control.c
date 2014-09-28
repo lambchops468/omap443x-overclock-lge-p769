@@ -39,6 +39,7 @@
  */
 #define GPU_MAX_UVOLT 1250000
 #define GPU_MIN_UVOLT 830000
+#define GPU_OC_OPP_IDX (gpu_opp_count-1)
 
 /* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 static struct mutex *omap_cpufreq_lock_p = NULL;
@@ -432,7 +433,7 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 	 * tried to modify the nominal voltages in omap443x_vdd_core_volt_data,
 	 * these voltages would not be able to be used and the voltage system
 	 * will throw errors. */
-	if (id != gpu_opp_count-1) {
+	if (id != GPU_OC_OPP_IDX) {
 		pr_err("cpu-control : can only modify fastest opp for GPU\n");
 		return -EINVAL;
 	}

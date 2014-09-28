@@ -573,8 +573,15 @@ int omap_gpu_thermal_rethrottle(bool throttle) {
 	if (rescale_required) {
 		pdata = gpu_dev->platform_data;
 		ret = pdata->device_scale(gpu_dev, gpu_dev, gpu_def_ft[GPU_OC_OPP_IDX].rate);
+		if (ret)
+			goto out;
 	}
 
+	pr_info("%s: GPU %s at maximum %lu MHz\n", __func__,
+			throttle ? "throttled" : "unthrottled",
+			gpu_def_ft[GPU_OC_OPP_IDX].rate / 1000000);
+
+out:
 	mutex_unlock(&gpu_throttle_mutex);
 
 	return ret;

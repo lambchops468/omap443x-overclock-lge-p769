@@ -111,6 +111,12 @@ static int vdd_core_volt_data_count;
 static struct omap_volt_data gpu_extra_volt_data =
 	VOLT_DATA_DEFINE(0, 0, OMAP44XX_CONTROL_FUSE_CORE_OPP100, 0xf9, 0x16, OMAP_ABB_NONE);
 
+/* Protected by omap_dvfs_lock */
+static DEFINE_MUTEX(gpu_throttle_mutex);
+static bool gpu_throttling = false;
+static unsigned int gpu_oc_freq = 0;
+static unsigned int gpu_oc_uvolt = 0;
+
 /* A replacement for cpufreq_parse_governor().
  * For some reason the above function does not exist in the symbol tables.
  * (it was probably inlined...)
@@ -275,6 +281,15 @@ static void set_one_mpu_opp(unsigned int index, unsigned int freq, unsigned int 
 	mpu_def_ft[index].opp->rate = freq;
 }
 
+static void gpu_set_oc_opp() {
+	int i = GPU_OC_OPP_IDX;
+	if (gpu_throttling) {
+		set_one_gpu_opp(i, gpu_def_ft[i].rate, gpu_def_ft[i].u_volt);
+	} else {
+		set_one_gpu_opp(i, gpu_oc_freq, gpu_oc_uvolt);
+	}
+}
+
 static void set_one_gpu_opp(unsigned int index, unsigned int freq, unsigned int volt) {
 	gpu_def_ft[index].opp->u_volt = volt;
 	gpu_def_ft[index].opp->rate = freq;
@@ -339,10 +354,19 @@ static ssize_t gpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *att
 
 	ret = scnprintf(buf, PAGE_SIZE, "Id\tFreq(mHz)\tVolt(mV)\n");
 	for(i = 0; i < gpu_opp_count; i++) {
+		unsigned int freq = gpu_def_ft[i].opp->rate/1000000;
+		unsigned int volt = gpu_def_ft[i].opp->u_volt/1000;
+
+		/* Show the OC freq and voltage, even during throttling */
+		if (gpu_def_ft[i].index == GPU_OC_OPP_IDX) {
+			freq = gpu_oc_freq/1000000;
+			volt = gpu_oc_uvolt/1000;
+		}
+
 		ret += scnprintf(buf+ret, PAGE_SIZE-ret, "%d\t%lu\t\t%lu\n",
 			gpu_def_ft[i].index,
-			gpu_def_ft[i].opp->rate/1000000,
-			gpu_def_ft[i].opp->u_volt/1000);
+			freq,
+			volt);
 	}
 
 	return ret;
@@ -477,7 +501,13 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 		gpu_vdd->volt_data = omap443x_vdd_core_volt_data_extra;
 	}
 
-	set_one_gpu_opp(id, freq, volt*1000);
+	gpu_oc_freq = freq;
+	gpu_oc_uvolt = volt*1000;
+
+	mutex_lock(&gpu_throttle_mutex);
+	gpu_set_oc_opp();
+	mutex_unlock(&gpu_throttle_mutex);
+
 	finish_gpu_opp_modify();
 
 	return count;
@@ -514,6 +544,41 @@ static struct attribute_group attr_group = {
 };
 
 /* sysfs end */
+
+int omap_gpu_thermal_rethrottle(bool throttle) {
+	unsigned int current_gpu_clk, target_gpu_clk, prev_target_clk;
+	bool rescale_required;
+	struct gpu_platform_data *pdata;
+	int ret;
+
+	prepare_gpu_opp_modify();
+
+	mutex_lock(&gpu_throttle_mutex);
+
+	prev_target_clk = gpu_def_ft[GPU_OC_OPP_IDX].opp->rate;
+
+	gpu_throttling = throttle;
+	gpu_set_oc_opp();
+
+	current_gpu_clk = clk_get_rate(gpu_clk);
+
+	rescale_required = current_gpu_clk == prev_target_clk;
+
+	finish_gpu_opp_modify();
+
+	/* Since we have let go of the omap_dvfs_lock, by this time the GPU
+	 * could be at a different frequency, and so a rescale may not be
+	 * required, but do it anyway. */
+	if (rescale_required) {
+		pdata = gpu_dev->pdata;
+		ret = pdata->device_scale(gpu_dev, gpu_dev, gpu_def_ft[GPU_OC_OPP_IDX].rate);
+	}
+
+	mutex_unlock(&gpu_throttle_mutex);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(omap_gpu_thermal_rethrottle);
 
 static int __init populate_def_mpu_freq_table(void) {
 	unsigned long freq;

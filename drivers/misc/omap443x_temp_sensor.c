@@ -452,10 +452,17 @@ static int omap_rethrottle_cpu(struct omap_temp_sensor *temp_sensor,
 	struct cpufreq_policy *policy = temp_sensor->cpufreq_policy;
 	struct cpufreq_frequency_table *freq_table = temp_sensor->freq_table;
 	unsigned int new_freq;
-	int ret = 0;
+	int cpu_ret, gpu_ret;
 
-	if (lock_policy_rwsem_write_s(policy->cpu) < 0)
-		return -ENODEV;
+	gpu_ret = omap_gpu_thermal_rethrottle(throttle);
+	if (gpu_ret) {
+		pr_err("%s: Could not rethrottle GPU: %d\n", __func__, gpu_ret);
+	}
+
+	if (lock_policy_rwsem_write_s(policy->cpu) < 0) {
+		cpu_ret = -ENODEV;
+		goto out;
+	}
 
 	/* Derive new throttle frequency from new_policy.max,
 	 * which takes into account the user's max and the
@@ -467,10 +474,10 @@ static int omap_rethrottle_cpu(struct omap_temp_sensor *temp_sensor,
 		new_freq = cpufreq_next_higher_freq(freq_table,
 				policy->max);
 	
-	/* If we can't do anything, bail and tell the caller */
+	/* If we can't do anything, bail */
 	if (new_freq == policy->cpuinfo.max_freq) {
-		ret = 1;
-		goto out;
+		cpu_ret = 0;
+		goto out_unlock;
 	}
 
 	/* Cannot set new_policy.cpuinfo.max_freq because policy->cpuinfo will
@@ -482,19 +489,22 @@ static int omap_rethrottle_cpu(struct omap_temp_sensor *temp_sensor,
 
 	/* new_policy only serves to be a placeholder argument for
 	 * __cpufreq_set_policy() */
-	ret = cpufreq_get_policy(&new_policy, policy->cpu);
-	if (ret)
-		goto out;
+	cpu_ret = cpufreq_get_policy(&new_policy, policy->cpu);
+	if (cpu_ret)
+		goto out_unlock;
 
-	ret = __cpufreq_set_policy_s(policy, &new_policy);
+	cpu_ret = __cpufreq_set_policy_s(policy, &new_policy);
 
 	policy->user_policy.policy = policy->policy;
 	policy->user_policy.governor = policy->governor;
 
-out:
+out_unlock:
 	unlock_policy_rwsem_write_s(policy->cpu);
-
-	return ret;
+out:
+	if (cpu_ret)
+		return cpu_ret;
+	else
+		return gpu_ret;
 }
 
 /*

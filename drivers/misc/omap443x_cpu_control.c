@@ -20,8 +20,9 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
-#include <plat/omap_device.h>
 #include <plat/common.h>
+#include <plat/gpu.h>
+#include <plat/omap_device.h>
 
 #include "../../../arch/arm/mach-omap2/voltage.h"
 #include "../../../arch/arm/mach-omap2/control.h"
@@ -682,15 +683,14 @@ static int __init cpu_control_init(void) {
 	struct voltagedomain *mpu_voltdm, *gpu_voltdm;
 	int ret;
 
+	/* arch/arm/plat-omap2/include/plat/cpu.h */
+	u32 *omap4_features_p;
+
 	pr_info("cpu-control : Hello world!\n");
 
 	if (!cpu_is_omap443x()) {
 		pr_err("cpu-control: CPU is not OMAP443x\n");
 		return 0;
-	}
-
-	if (omap4_has_mpu_1_2ghz()) {
-		pr_info("cpu-control: CPU has 1.2 GHz\n");
 	}
 
 	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
@@ -719,6 +719,13 @@ static int __init cpu_control_init(void) {
 
 	/* arch/arm/mach-omap2/dvfs.c */
 	SYMSEARCH_BIND_POINTER_TO(omap443x_cpu_control, struct mutex*, omap_dvfs_lock, omap_dvfs_lock_p);
+
+	/* arch/arm/plat-omap2/include/plat/cpu.h */
+	SYMSEARCH_BIND_POINTER_TO(omap443x_cpu_control, u32*, omap4_features, omap4_features_p);
+
+	if (*omap4_features_p & OMAP4_HAS_MPU_1_2GHZ) {
+		pr_info("cpu-control: CPU has 1.2 GHz\n");
+	}
 
 	/* cpufreq_cpu_get() should only be done on CPU0 (the boot cpu). For other
 	 * CPUs, the policy is destroyed/created on cpu hotplug (which happens during

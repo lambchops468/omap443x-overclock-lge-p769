@@ -624,6 +624,10 @@ static int __init cpu_control_init(void) {
 		return 0;
 	}
 
+	if (omap4_has_mpu_1_2ghz()) {
+		pr_info("cpu-control: CPU has 1.2 GHz\n");
+	}
+
 	/* arch/arm/mach-omap2/omap2plus-cpufreq.c */
 	/* freq_table and max_freq are popular symbol names in the kernel!
 	 * But we get lucky and the kernel only has one example of each

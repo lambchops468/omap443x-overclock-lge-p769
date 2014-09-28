@@ -550,7 +550,7 @@ int omap_gpu_thermal_rethrottle(bool throttle) {
 	unsigned long current_gpu_clk, prev_target_clk;
 	bool rescale_required;
 	struct gpu_platform_data *pdata;
-	int ret;
+	int ret = 0;
 
 	prepare_gpu_opp_modify();
 
@@ -571,7 +571,7 @@ int omap_gpu_thermal_rethrottle(bool throttle) {
 	 * could be at a different frequency, and so a rescale may not be
 	 * required, but do it anyway. */
 	if (rescale_required) {
-		pdata = gpu_dev->pdata;
+		pdata = gpu_dev->platform_data;
 		ret = pdata->device_scale(gpu_dev, gpu_dev, gpu_def_ft[GPU_OC_OPP_IDX].rate);
 	}
 

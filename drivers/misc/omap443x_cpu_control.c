@@ -281,6 +281,11 @@ static void set_one_mpu_opp(unsigned int index, unsigned int freq, unsigned int 
 	mpu_def_ft[index].opp->rate = freq;
 }
 
+static void set_one_gpu_opp(int index, unsigned long freq, unsigned long volt) {
+	gpu_def_ft[index].opp->u_volt = volt;
+	gpu_def_ft[index].opp->rate = freq;
+}
+
 static void gpu_set_oc_opp() {
 	int i = GPU_OC_OPP_IDX;
 	if (gpu_throttling) {
@@ -288,11 +293,6 @@ static void gpu_set_oc_opp() {
 	} else {
 		set_one_gpu_opp(i, gpu_oc_freq, gpu_oc_uvolt);
 	}
-}
-
-static void set_one_gpu_opp(unsigned int index, unsigned int freq, unsigned int volt) {
-	gpu_def_ft[index].opp->u_volt = volt;
-	gpu_def_ft[index].opp->rate = freq;
 }
 
 /*  sysfs */

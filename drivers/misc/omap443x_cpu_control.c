@@ -698,7 +698,7 @@ static int __init cpu_control_init(void) {
 	 * But we get lucky and the kernel only has one example of each
 	 * symbol (see System.map after compilation) */
 	SYMSEARCH_BIND_POINTER_TO(omap443x_cpu_control, struct mutex*, omap_cpufreq_lock, omap_cpufreq_lock_p);
-	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, unsigned int*, max_freq, max_freq_p);
+	SYMSEARCH_BIND_POINTER_TO(omap443x_cpu_control, unsigned int*, max_freq, max_freq_p);
 
 	/* drivers/base/power/opp.c */
 	SYMSEARCH_BIND_FUNCTION_TO(omap443x_cpu_control, opp_add, opp_add_s);

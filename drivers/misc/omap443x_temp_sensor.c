@@ -133,7 +133,8 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(int, lock_policy_rwsem_write_s, int cpu);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(void, unlock_policy_rwsem_write_s, int cpu);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, __cpufreq_set_policy_s,
 		struct cpufreq_policy *data, struct cpufreq_policy *policy);
-
+/* drivers/misc/omap443x_cpu_control.c */
+extern int omap_gpu_thermal_rethrottle(bool throttle);
 
 static bool auto_throttle = true;
 module_param(auto_throttle, bool, S_IRUGO);

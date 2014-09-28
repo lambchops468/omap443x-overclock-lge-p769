@@ -286,7 +286,7 @@ static void set_one_gpu_opp(int index, unsigned long freq, unsigned long volt) {
 	gpu_def_ft[index].opp->rate = freq;
 }
 
-static void gpu_set_oc_opp() {
+static void gpu_set_oc_opp(void) {
 	int i = GPU_OC_OPP_IDX;
 	if (gpu_throttling) {
 		set_one_gpu_opp(i, gpu_def_ft[i].rate, gpu_def_ft[i].u_volt);
@@ -379,7 +379,7 @@ static ssize_t cpu_tweak_opp_store(struct kobject *kobj,
 	unsigned long volt; //in mV
 	int ret;
 
-	if(sscanf(buf, "%d %u %u", &id, &freq, &volt) != 3) {
+	if(sscanf(buf, "%d %lu %lu", &id, &freq, &volt) != 3) {
 		return -EINVAL;
 	}
 
@@ -397,14 +397,14 @@ static ssize_t cpu_tweak_opp_store(struct kobject *kobj,
 	}
 
 	if (id > 0 && freq_table[id-1].frequency >= freq/1000) {
-		pr_err("cpu-control : Rounded frequency %u is not above "
+		pr_err("cpu-control : Rounded frequency %lu is not above "
 				"previous OPP's frequency", freq);
 		return -EINVAL;
 	}
 
 	if (id < mpu_opp_count-1 && freq_table[id+1].frequency <= freq/1000) {
-		pr_err("cpu-control : Rounded frequency %u is not below "
-				"next OPP's frequency");
+		pr_err("cpu-control : Rounded frequency %lu is not below "
+				"next OPP's frequency", freq);
 		return -EINVAL;
 	}
 
@@ -418,7 +418,7 @@ static ssize_t cpu_tweak_opp_store(struct kobject *kobj,
 		volt = MPU_MIN_UVOLT/1000;
 	}
 
-	pr_info("cpu-control : Change CPU operating point : %u %u Mhz %u mV\n",
+	pr_info("cpu-control : Change CPU operating point : %d %lu Mhz %lu mV\n",
 			id, freq/1000000, volt);
 
 	ret = prepare_mpu_opp_modify();
@@ -437,11 +437,11 @@ static ssize_t cpu_tweak_opp_store(struct kobject *kobj,
 static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count) {
 	int id;
-	unsigned int freq; //in KHz
-	unsigned int volt; //in mV
+	unsigned long freq; //in KHz
+	unsigned long volt; //in mV
 	struct omap_volt_data *volt_data;
 
-	if(sscanf(buf, "%d %u %u", &id, &freq, &volt) != 3) {
+	if(sscanf(buf, "%d %lu %lu", &id, &freq, &volt) != 3) {
 		return -EINVAL;
 	}
 
@@ -469,8 +469,8 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 	}
 
 	if (id > 0 && gpu_def_ft[id-1].opp->rate >= freq) {
-		pr_err("cpu-control : Rounded frequency %u is not above "
-				"previous OPP's frequency");
+		pr_err("cpu-control : Rounded frequency %lu is not above "
+				"previous OPP's frequency", freq);
 		return -EINVAL;
 	}
 
@@ -485,7 +485,7 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 		volt = GPU_MAX_UVOLT/1000;
 	}
 
-	pr_info("cpu-control : Change GPU operating point : %u %u Mhz %u mV\n",
+	pr_info("cpu-control : Change GPU operating point : %d %lu Mhz %lu mV\n",
 			id, freq/1000000, volt);
 
 

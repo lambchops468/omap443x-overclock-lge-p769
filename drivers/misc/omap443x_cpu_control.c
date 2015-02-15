@@ -115,6 +115,10 @@ static struct omap_volt_data gpu_extra_volt_data =
 /* Protected by omap_dvfs_lock */
 static DEFINE_MUTEX(gpu_throttle_mutex);
 static bool gpu_throttling = false;
+/* The overclocked GPU frequency/voltage. Kept in separate variables because
+ * the thermal throttle mechamism for the GPU overwrites the overclock OPP
+ * with the default voltage/frequency pair, so we need to store the
+ * overclocked values elsewhere. */
 static unsigned long gpu_oc_freq = 0;
 static unsigned long gpu_oc_uvolt = 0;
 
@@ -492,7 +496,7 @@ static ssize_t gpu_tweak_opp_store(struct kobject *kobj,
 
 	prepare_gpu_opp_modify();
 
-	/* Extra voltage slot not required */
+	/* Extra voltage slot not required. Use count-2 to account for sentinel element. */
 	if (volt*1000 == omap443x_vdd_core_volt_data_p[vdd_core_volt_data_count-2].volt_nominal) {
 		gpu_vdd->volt_data = omap443x_vdd_core_volt_data_p;
 	} else {
@@ -563,6 +567,7 @@ int omap_gpu_thermal_rethrottle(bool throttle) {
 
 	current_gpu_clk = clk_get_rate(gpu_clk);
 
+	/* Check if the GPU is running at the fastest speed. */
 	rescale_required = current_gpu_clk == prev_target_clk;
 
 	finish_gpu_opp_modify();
@@ -664,6 +669,11 @@ static int __init populate_def_gpu_freq_table(void) {
 		pr_info("GPU Map %d : %lu Mhz : %lu mV\n", gpu_def_ft[i].index,
 				gpu_def_ft[i].rate/1000000, gpu_def_ft[i].u_volt/1000);
 	}
+
+	/* fill in the overclock variables so throttling works even if
+	 * not overclocked */
+	gpu_oc_freq = gpu_def_ft[GPU_OC_OPP_IDX].rate;
+	gpu_oc_uvolt = gpu_def_ft[GPU_OC_OPP_IDX].uvolt;
 out:
 	rcu_read_unlock();
 

@@ -479,12 +479,7 @@ static void omap_rethrottle_cpu(struct omap_temp_sensor *temp_sensor,
 	if (throttle) {
 		omap_thermal_throttle_s();
 	} else {
-		omap_thermal_unthrottle_step();
-	}
-
-	if (lock_policy_rwsem_write_s(policy->cpu) < 0) {
-		cpu_ret = -ENODEV;
-		goto out;
+		omap_thermal_unthrottle_step(temp_sensor);
 	}
 }
 
@@ -506,7 +501,6 @@ static ssize_t omap_throttle_store(struct device *dev,
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct omap_temp_sensor *temp_sensor = platform_get_drvdata(pdev);
-	int ret;
 
 	if (count && buf[0] == '1') {
 		omap_rethrottle_cpu(temp_sensor, true);

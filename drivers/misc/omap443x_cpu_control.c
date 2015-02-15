@@ -673,7 +673,7 @@ static int __init populate_def_gpu_freq_table(void) {
 	/* fill in the overclock variables so throttling works even if
 	 * not overclocked */
 	gpu_oc_freq = gpu_def_ft[GPU_OC_OPP_IDX].rate;
-	gpu_oc_uvolt = gpu_def_ft[GPU_OC_OPP_IDX].uvolt;
+	gpu_oc_uvolt = gpu_def_ft[GPU_OC_OPP_IDX].u_volt;
 out:
 	rcu_read_unlock();
 

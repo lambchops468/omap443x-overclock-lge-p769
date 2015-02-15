@@ -30,16 +30,16 @@
  *
  * The throttle algorithm checks the temperature, and if it is above the hot
  * threshold, the driver will disable the highest enabled frequency. The next
- * temperature check in this case occurs in 1 second. If the temperature is
+ * temperature check in this case occurs in 0.25 second. If the temperature is
  * still above the hot threshold, then the next highest frequency is also
- * disabled. The next temperature check occurs in 1 second.
+ * disabled. The next temperature check occurs in 0.25 second.
  *
  * When the temperature check is below the cold threshold, then  the driver
  * will enable the next faster frequency. The next temperature check will
  * occur in 1 second.
  *
  * If the current temperature during the check is 10 degrees below the cold
- * threshold, then the next check will occur in 5 seconds.
+ * threshold, then the next check will occur in 1 seconds.
  *
  * Automatic throttling can be disabled by loading the module with
  * auto_throttle = 0:
@@ -149,9 +149,9 @@ static void throttle_delayed_work_fn(struct work_struct *work);
  */
 #define THROTTLE_COLD		83000	/* 83 deg C */
 #define THROTTLE_HOT		85000	/* 85 deg C */
-#define	THROTTLE_DELAY_HOT	1000	/* 1 second */
+#define	THROTTLE_DELAY_HOT	250	/* 0.250 second */
 #define THROTTLE_WARM_OFFSET	10000	/* 10 deg C */
-#define	THROTTLE_DELAY_COLD	5000	/* 5 seconds */
+#define	THROTTLE_DELAY_COLD	1000	/* 1 second */
 
 
 /**

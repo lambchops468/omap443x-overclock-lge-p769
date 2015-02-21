@@ -1042,7 +1042,7 @@ static struct omap_hwmod_ocp_if *omap443x_bandgap_slaves[] = {
 	&omap44xx_l4_cfg__bandgap,
 };
 
-int __init omap_temp_sensor_init(void)
+static int __init omap_temp_sensor_init(void)
 {
 	struct omap_hwmod *omap44xx_l4_cfg_hwmod_p = NULL;
         struct omap_hwmod *omap443x_bandgap_hwmod_p = NULL;

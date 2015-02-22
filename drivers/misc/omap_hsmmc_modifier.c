@@ -220,6 +220,14 @@ wrong_dev:
 }
 
 static void __exit omap_hsmmc_modifier_exit(void) {
+	struct platform_device *mmc_pdev = NULL;
+	struct omap_hsmmc_host *host = NULL;
+
+	mmc_pdev = to_platform_device(mmc_dev);
+	host = platform_get_drvdata(mmc_pdev);
+
+	mmc_slot(host).mmc_data.built_in = 0;
+
 	put_device(mmc_host_dev);
 	put_device(mmc_dev);
 }

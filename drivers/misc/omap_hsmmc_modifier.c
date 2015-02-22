@@ -131,7 +131,6 @@ struct omap_hsmmc_host {
 #define mmc_slot(host)		(host->pdata->slots[host->slot_id])
 
 #define to_dev(obj) container_of(obj, struct device, kobj)
-#define to_mmc_host(obj) container_of(obj, struct mmc_host, class_dev)
 
 /* When the omap_hsmmc driver sets up the mmc platform device, it creates a
  * subdevice called "mmc1" */
@@ -195,7 +194,8 @@ static int __init omap_hsmmc_modifier_init(void) {
 		pr_err("omap_hsmmc_modifier failed: Found wrong slot!\n");
 		goto wrong_slot;
 	}
-	//struct mmc_host *host = to_mmc_host(mmc_host_dev);
+
+	pr_info("omap_hsmmc_modifier: successfully modified mmc properties\n");
 
 	return 0;
 

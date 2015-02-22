@@ -37,6 +37,15 @@
  * (omap_init_hsmmc() also registers the omap hardware module representing
  * the mmc slotby calling omap_device_build(), which causes another copy when
  * platform_device_add_data() is called.
+ *
+ * This driver causes "mmc1: Re-init card rc = <errno>" to appear in dmesg
+ * during resume. We've observed errno to be -84, -EILSEQ. Reading the Secure
+ * Digital command spec and the code shows that if card reinitialization was
+ * able to start, but not finish, the card would not be able to enter data
+ * transfer mode. I theorize that the failure to reinitialze is the crappy
+ * off-brand not following the spec and allowing reinitialzation without
+ * a poweroff/on cycle. The card appears to work fine (at 50 MHz, 4 bit bus),
+ * even with this reinit failure. So everything is probably fine.
  */
 
 #include <linux/clk.h>
@@ -185,11 +194,11 @@ static int __init omap_hsmmc_modifier_init(void) {
 	mmc_pdev = to_platform_device(mmc_dev);
 	host = platform_get_drvdata(mmc_pdev);
 
-	/* Make the hell sure this isn't the eMMC chip. */
+	/* Make the hell sure this isn't the eMMC chip.
+	 * Don't want to corrupt that one. */
 	if (mmc_slot(host).nonremovable == false &&
 	    mmc_slot(host).power_saving == true) {
 		mmc_slot(host).mmc_data.built_in = 1;
-		host->mmc->pm_flags |= MMC_PM_KEEP_POWER;
 	} else {
 		pr_err("omap_hsmmc_modifier failed: Found wrong slot!\n");
 		goto wrong_slot;

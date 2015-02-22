@@ -38,6 +38,10 @@
  * the mmc slotby calling omap_device_build(), which causes another copy when
  * platform_device_add_data() is called.
  *
+ * It might appear that mmc_pm_notify() in drivers/mmc/core/core.c does
+ * mmc_power_off() even when built_in is set, but this is not true because
+ * host->bus_ops->suspend is present for the sd card.
+ *
  * This driver causes "mmc1: Re-init card rc = <errno>" to appear in dmesg
  * during resume. We've observed errno to be -84, -EILSEQ. Reading the Secure
  * Digital command spec and the code shows that if card reinitialization was

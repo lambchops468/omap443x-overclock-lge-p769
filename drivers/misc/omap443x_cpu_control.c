@@ -363,7 +363,7 @@ static ssize_t gpu_cur_opp_show(struct kobject *kobj, struct kobj_attribute *att
 		unsigned long volt = gpu_def_ft[i].opp->u_volt/1000;
 
 		/* Show the OC freq and voltage, even during throttling */
-		if (gpu_def_ft[i].index == GPU_OC_OPP_IDX) {
+		if (gpu_def_ft[i].index == GPU_OC_OPP_IDX && gpu_oc_freq != 0) {
 			freq = gpu_oc_freq/1000000;
 			volt = gpu_oc_uvolt/1000;
 		}
@@ -556,6 +556,9 @@ int omap_gpu_thermal_rethrottle(bool throttle) {
 	struct gpu_platform_data *pdata;
 	int ret = 0;
 
+	if (gpu_oc_freq == 0) /* not overclocked */
+		return ret;
+
 	prepare_gpu_opp_modify();
 
 	mutex_lock(&gpu_throttle_mutex);
@@ -670,10 +673,8 @@ static int __init populate_def_gpu_freq_table(void) {
 				gpu_def_ft[i].rate/1000000, gpu_def_ft[i].u_volt/1000);
 	}
 
-	/* fill in the overclock variables so throttling works even if
-	 * not overclocked */
-	gpu_oc_freq = gpu_def_ft[GPU_OC_OPP_IDX].rate;
-	gpu_oc_uvolt = gpu_def_ft[GPU_OC_OPP_IDX].u_volt;
+	gpu_oc_freq = 0;
+	gpu_oc_uvolt = 0;
 out:
 	rcu_read_unlock();
 

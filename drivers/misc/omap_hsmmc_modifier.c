@@ -150,15 +150,41 @@ struct omap_hsmmc_host {
 #define MMC_PLATFORM_DEV_NAME "omap_hsmmc.0"
 #define MMC_HOST_DEV_NAME "mmc1"
 
-struct device *mmc_dev;
-struct device *mmc_host_dev;
+static struct device *mmc_dev;
+static struct device *mmc_host_dev;
+
+int omap_hsmmc_modifier_resume_noirq(struct device *dev) {
+	struct platform_device *mmc_pdev = NULL;
+	struct omap_hsmmc_host *host = NULL;
+
+	mmc_pdev = to_platform_device(mmc_dev);
+	host = platform_get_drvdata(mmc_pdev);
+
+	host->mmc->pm_flags &= ~MMC_PM_KEEP_POWER;
+
+	pr_info("omap_hsmmc_modifier: Flopped Keep Power Bit\n");
+
+	return 0;
+}
+
+static const struct dev_pm_ops pm_ops = {
+	.resume_noirq = omap_hsmmc_modifier_resume_noirq,
+};
+static const struct device_type dev_type = {
+	.name = "omap_hsmmc_modifier_type",
+	.pm = &pm_ops,
+	/* todo: add release function. */
+};
+static struct device mod_dev = {
+	.type = &dev_type,
+	.init_name = "omap_hsmmc_modifier_dev",
+};
 
 static int match_mmc_host(struct device *dev, void *unused) {
 	return strcmp(dev_name(dev), MMC_HOST_DEV_NAME) == 0;
 }
 
 static int __init omap_hsmmc_modifier_init(void) {
-	struct device dev;
 	struct kset *device_kset = NULL;
 	struct kobject *mmc_kobj = NULL;
 	struct platform_device *mmc_pdev = NULL;
@@ -167,15 +193,19 @@ static int __init omap_hsmmc_modifier_init(void) {
 	SYMSEARCH_BIND_FUNCTION_TO(omap_hsmmc_modifier, kset_find_obj, kset_find_obj_s);
 	SYMSEARCH_BIND_POINTER_TO(omap_hsmmc_modifier, struct kobj_type*, device_ktype, device_ktype_p);
 
-	device_initialize(&dev);
-	device_kset = dev.kobj.kset;
+	device_initialize(&mod_dev);
+	if (device_add(&mod_dev)) {
+		pr_err("omap_hsmmc_modifier init failed: Couldn't add fake device.\n");
+		return ENODEV;
+	}
+	device_kset = mod_dev.kobj.kset;
 	/* This gets the mmc device */
 	mmc_kobj = kset_find_obj_s(device_kset, MMC_PLATFORM_DEV_NAME);
 
 	if (mmc_kobj == NULL) {
 		pr_err("omap_hsmmc_modifier init failed: Couldn't find "
 				MMC_PLATFORM_DEV_NAME ".\n");
-		return ENODEV;
+		goto no_kobj;
 	}
 
 	if (get_ktype(mmc_kobj) != device_ktype_p) {
@@ -216,6 +246,8 @@ wrong_slot:
 	put_device(mmc_host_dev);
 wrong_dev:
 	put_device(mmc_dev);
+no_kobj:
+	device_del(&mod_dev);
 	return ENODEV;
 }
 
@@ -230,6 +262,7 @@ static void __exit omap_hsmmc_modifier_exit(void) {
 
 	put_device(mmc_host_dev);
 	put_device(mmc_dev);
+	device_del(&mod_dev);
 }
 
 module_init(omap_hsmmc_modifier_init);

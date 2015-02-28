@@ -83,6 +83,9 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(struct kobject*, kset_find_obj_s, struct kset 
 /* This function is not exported so we have to symsearch it */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(void, suspend_set_ops_s, const struct platform_suspend_ops *ops);
 
+/* kernel/power/wakelock.c */
+static unsigned *suspend_short_count_p = NULL;
+
 /* drivers/base/core.c */
 static const struct kobj_type *device_ktype_p = NULL;
 
@@ -168,7 +171,7 @@ static void omap_hsmmc_modifier_dev_type_release(struct device *dev) {
 	return;
 }
 
-static void omap_hsmmc_modifier_suspend_recover(void) {
+static void omap_hsmmc_modifier_flip_bit(void) {
 	struct platform_device *mmc_pdev = NULL;
 	struct omap_hsmmc_host *host = NULL;
 
@@ -180,8 +183,21 @@ static void omap_hsmmc_modifier_suspend_recover(void) {
 	pr_info("omap_hsmmc_modifier: Unset MMC_PM_KEEP_POWER\n");
 }
 
+static void omap_hsmmc_modifier_suspend_recover(void) {
+	omap_hsmmc_modifier_flip_bit();
+
+	/* Increment suspend_short_count by 4 so that
+	 * wakelock.c's suspend() will backoff after 2 attempts to suspend */
+	*suspend_short_count_p += 4;
+	/* this should never happen, but if it does the backoff will never
+	 * trigger unless we do something */
+	if (*suspend_short_count_p >= 10) {
+		*suspend_short_count_p = 9;
+	}
+}
+
 static int omap_hsmmc_modifier_resume_noirq(struct device *dev) {
-	omap_hsmmc_modifier_suspend_recover();
+	omap_hsmmc_modifier_flip_bit();
 	return 0;
 }
 
@@ -212,6 +228,7 @@ static int __init omap_hsmmc_modifier_init(void) {
 	SYMSEARCH_BIND_FUNCTION_TO(omap_hsmmc_modifier, suspend_set_ops, suspend_set_ops_s);
 	SYMSEARCH_BIND_POINTER_TO(omap_hsmmc_modifier, struct kobj_type*, device_ktype, device_ktype_p);
 	SYMSEARCH_BIND_POINTER_TO(omap_hsmmc_modifier, struct platform_suspend_ops*, omap_pm_ops, omap_pm_ops_p);
+	SYMSEARCH_BIND_POINTER_TO(omap_hsmmc_modifier, unsigned*, suspend_short_count, suspend_short_count_p);
 
 	device_initialize(&omap_hsmmc_modifier_dev);
 	if (device_add(&omap_hsmmc_modifier_dev)) {

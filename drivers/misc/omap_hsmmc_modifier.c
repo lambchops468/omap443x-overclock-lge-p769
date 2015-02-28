@@ -64,6 +64,7 @@
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/string.h>
+#include <linux/suspend.h>
 #include <linux/workqueue.h>
 
 #include <plat/mmc.h>
@@ -78,8 +79,15 @@
 /* This function is not exported so we have to symsearch it */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct kobject*, kset_find_obj_s, struct kset *kset, const char *name);
 
+/* kernel/power/suspend.c */
+/* This function is not exported so we have to symsearch it */
+SYMSEARCH_DECLARE_FUNCTION_STATIC(void, suspend_set_ops_s, const struct platform_suspend_ops *ops);
+
 /* drivers/base/core.c */
-static struct kobj_type *device_ktype_p = NULL;
+static const struct kobj_type *device_ktype_p = NULL;
+
+/* arch/arm/mach-omap2/pm44xx.c */
+static const struct platform_suspend_ops *omap_pm_ops_p = NULL;
 
 /* drivers/mmc/host/omap_hsmmc.c */
 /* Unfortunately the struct below is not in a header so we duplicate here */
@@ -153,7 +161,14 @@ struct omap_hsmmc_host {
 static struct device *mmc_dev;
 static struct device *mmc_host_dev;
 
-int omap_hsmmc_modifier_resume_noirq(struct device *dev) {
+static struct platform_suspend_ops omap_pm_mod_ops;
+
+static void omap_hsmmc_modifier_dev_type_release(struct device *dev) {
+	/* dev is statically allocated */
+	return;
+}
+
+static void omap_hsmmc_modifier_suspend_recover(void) {
 	struct platform_device *mmc_pdev = NULL;
 	struct omap_hsmmc_host *host = NULL;
 
@@ -162,21 +177,24 @@ int omap_hsmmc_modifier_resume_noirq(struct device *dev) {
 
 	host->mmc->pm_flags &= ~MMC_PM_KEEP_POWER;
 
-	pr_info("omap_hsmmc_modifier: Flopped Keep Power Bit\n");
+	pr_info("omap_hsmmc_modifier: Unset MMC_PM_KEEP_POWER\n");
+}
 
+static int omap_hsmmc_modifier_resume_noirq(struct device *dev) {
+	omap_hsmmc_modifier_suspend_recover();
 	return 0;
 }
 
 static const struct dev_pm_ops pm_ops = {
 	.resume_noirq = omap_hsmmc_modifier_resume_noirq,
 };
-static const struct device_type dev_type = {
+static const struct device_type omap_hsmmc_modifier_dev_type = {
 	.name = "omap_hsmmc_modifier_type",
 	.pm = &pm_ops,
-	/* todo: add release function. */
+	.release = omap_hsmmc_modifier_dev_type_release,
 };
-static struct device mod_dev = {
-	.type = &dev_type,
+static struct device omap_hsmmc_modifier_dev = {
+	.type = &omap_hsmmc_modifier_dev_type,
 	.init_name = "omap_hsmmc_modifier_dev",
 };
 
@@ -191,14 +209,16 @@ static int __init omap_hsmmc_modifier_init(void) {
 	struct omap_hsmmc_host *host = NULL;
 
 	SYMSEARCH_BIND_FUNCTION_TO(omap_hsmmc_modifier, kset_find_obj, kset_find_obj_s);
+	SYMSEARCH_BIND_FUNCTION_TO(omap_hsmmc_modifier, suspend_set_ops, suspend_set_ops_s);
 	SYMSEARCH_BIND_POINTER_TO(omap_hsmmc_modifier, struct kobj_type*, device_ktype, device_ktype_p);
+	SYMSEARCH_BIND_POINTER_TO(omap_hsmmc_modifier, struct platform_suspend_ops*, omap_pm_ops, omap_pm_ops_p);
 
-	device_initialize(&mod_dev);
-	if (device_add(&mod_dev)) {
+	device_initialize(&omap_hsmmc_modifier_dev);
+	if (device_add(&omap_hsmmc_modifier_dev)) {
 		pr_err("omap_hsmmc_modifier init failed: Couldn't add fake device.\n");
 		return ENODEV;
 	}
-	device_kset = mod_dev.kobj.kset;
+	device_kset = omap_hsmmc_modifier_dev.kobj.kset;
 	/* This gets the mmc device */
 	mmc_kobj = kset_find_obj_s(device_kset, MMC_PLATFORM_DEV_NAME);
 
@@ -238,6 +258,14 @@ static int __init omap_hsmmc_modifier_init(void) {
 		goto wrong_slot;
 	}
 
+	omap_pm_mod_ops.begin	= omap_pm_ops_p->begin;
+	omap_pm_mod_ops.end	= omap_pm_ops_p->end;
+	omap_pm_mod_ops.prepare	= omap_pm_ops_p->prepare;
+	omap_pm_mod_ops.enter	= omap_pm_ops_p->enter;
+	omap_pm_mod_ops.valid	= omap_pm_ops_p->valid;
+	omap_pm_mod_ops.recover = omap_hsmmc_modifier_suspend_recover;
+	suspend_set_ops_s(&omap_pm_mod_ops);
+
 	pr_info("omap_hsmmc_modifier: successfully modified mmc properties\n");
 
 	return 0;
@@ -247,13 +275,15 @@ wrong_slot:
 wrong_dev:
 	put_device(mmc_dev);
 no_kobj:
-	device_del(&mod_dev);
+	device_del(&omap_hsmmc_modifier_dev);
 	return ENODEV;
 }
 
 static void __exit omap_hsmmc_modifier_exit(void) {
 	struct platform_device *mmc_pdev = NULL;
 	struct omap_hsmmc_host *host = NULL;
+
+	suspend_set_ops_s(omap_pm_ops_p);
 
 	mmc_pdev = to_platform_device(mmc_dev);
 	host = platform_get_drvdata(mmc_pdev);
@@ -262,7 +292,7 @@ static void __exit omap_hsmmc_modifier_exit(void) {
 
 	put_device(mmc_host_dev);
 	put_device(mmc_dev);
-	device_del(&mod_dev);
+	device_del(&omap_hsmmc_modifier_dev);
 }
 
 module_init(omap_hsmmc_modifier_init);

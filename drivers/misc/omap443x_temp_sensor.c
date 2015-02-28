@@ -139,9 +139,6 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned int, omap_getspeed_s,
 	unsigned int cpu);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned int, omap_cpufreq_scale_s,
 	unsigned int target_freq, unsigned int cur_freq);
-/* drivers/cpufreq/cpufreq.c */
-SYMSEARCH_DECLARE_FUNCTION_STATIC(int, lock_policy_rwsem_read_s, int cpu);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(void, unlock_policy_rwsem_read_s, int cpu);
 /* drivers/misc/omap443x_cpu_control.c */
 extern int omap_gpu_thermal_rethrottle(bool throttle);
 
@@ -389,20 +386,6 @@ static bool schedule_throttle_work(struct omap_temp_sensor *temp_sensor,
 	return queue_delayed_work(system_freezable_wq,
 			&temp_sensor->throttle_work,
 			msecs_to_jiffies(delay_ms));
-}
-
-static unsigned int cpufreq_get_max_freq(struct cpufreq_policy *policy)
-{
-	unsigned int freq;
-
-	if (lock_policy_rwsem_read_s(policy->cpu) < 0)
-		return -1;
-
-	freq = policy->cpuinfo.max_freq;
-
-	unlock_policy_rwsem_read_s(policy->cpu);
-
-	return freq;
 }
 
 /* Find the next lowest frequency higher than freq. Capable of handling the case
@@ -1073,9 +1056,6 @@ static int __init omap_temp_sensor_init(void)
 	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, unsigned int*, max_thermal, max_thermal_freq_p);
 	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, unsigned int*, max_freq, max_freq_p);
 	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, unsigned int*, current_target_freq, current_target_freq_p);
-	/* drivers/cpufreq/cpufreq.c */
-	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, lock_policy_rwsem_read, lock_policy_rwsem_read_s);
-	SYMSEARCH_BIND_FUNCTION_TO(omap_temp_sensor, unlock_policy_rwsem_read, unlock_policy_rwsem_read_s);
         /* arch/arm/mach-omap2/omap_hwmod_44xx_data.c */
 	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct omap_hwmod*, omap44xx_l4_cfg_hwmod, omap44xx_l4_cfg_hwmod_p);
 	SYMSEARCH_BIND_POINTER_TO(omap_temp_sensor, struct omap_hwmod*, omap443x_bandgap_hwmod, omap443x_bandgap_hwmod_p);

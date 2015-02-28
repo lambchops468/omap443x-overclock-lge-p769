@@ -189,8 +189,8 @@ static void omap_hsmmc_modifier_suspend_recover(void) {
 	/* Increment suspend_short_count by 4 so that
 	 * wakelock.c's suspend() will backoff after 2 attempts to suspend */
 	*suspend_short_count_p += 4;
-	/* this should never happen, but if it does the backoff will never
-	 * trigger unless we do something */
+	/* This may happen if at some point a successful suspended happened
+	 * but the system stayed suspended for less than a second */
 	if (*suspend_short_count_p >= 10) {
 		*suspend_short_count_p = 9;
 	}

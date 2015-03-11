@@ -188,8 +188,10 @@ static void omap_hsmmc_modifier_suspend_recover(void) {
 
 	/* Increment suspend_short_count by 9 so that
 	 * wakelock.c's suspend() will backoff after 1 attempt to suspend,
-	 * which failed during device suspend, or 1 early suspend abort caused
-	 * by wakelock detect */
+	 * which failed during device suspend. Note that if an early suspend
+	 * abort occurs (probably because a wakelock is held), we still will
+	 * try to do actual suspend after that, and then we will run this
+	 * code */
 	*suspend_short_count_p = 9;
 }
 

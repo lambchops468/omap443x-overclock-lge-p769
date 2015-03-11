@@ -186,18 +186,11 @@ static void omap_hsmmc_modifier_flip_bit(void) {
 static void omap_hsmmc_modifier_suspend_recover(void) {
 	omap_hsmmc_modifier_flip_bit();
 
-	/* Increment suspend_short_count by 8 so that
+	/* Increment suspend_short_count by 9 so that
 	 * wakelock.c's suspend() will backoff after 1 attempt to suspend,
 	 * which failed during device suspend, or 1 early suspend abort caused
-	 * by wakelock detect and another abort caused by either wakelock
-	 * detect or a failure during device suspend */
-	*suspend_short_count_p += 8;
-	/* This may happen if at some point a successful suspended happened
-	 * but the system stayed suspended for less than a second, or if
-	 * suspend fails because of wakelock detection. */
-	if (*suspend_short_count_p >= 10) {
-		*suspend_short_count_p = 9;
-	}
+	 * by wakelock detect */
+	*suspend_short_count_p = 9;
 }
 
 static int omap_hsmmc_modifier_resume_noirq(struct device *dev) {

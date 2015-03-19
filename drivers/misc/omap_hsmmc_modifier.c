@@ -75,6 +75,12 @@
 
 #include "symsearch/symsearch.h"
 
+// If true, allow only one suspend attempt. Otherwise, alow two.
+static bool allow_one_suspend_attempt = false;
+module_param(allow_one_suspend_attempt, bool, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(allow_one_suspend_attempt, "If true, only one device suspend "
+	"attempt is allowed before backing off. Otherwise, allow two.");
+
 /* lib/kobject.c */
 /* This function is not exported so we have to symsearch it */
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct kobject*, kset_find_obj_s, struct kset *kset, const char *name);
@@ -186,13 +192,29 @@ static void omap_hsmmc_modifier_flip_bit(void) {
 static void omap_hsmmc_modifier_suspend_recover(void) {
 	omap_hsmmc_modifier_flip_bit();
 
-	/* Increment suspend_short_count by 9 so that
-	 * wakelock.c's suspend() will backoff after 1 attempt to suspend,
-	 * which failed during device suspend. Note that if an early suspend
-	 * abort occurs (probably because a wakelock is held), we still will
-	 * try to do actual suspend after that, and then we will run this
-	 * code */
-	*suspend_short_count_p = 9;
+	if (allow_one_suspend_attempt) {
+		/* Increment suspend_short_count by 9 so that
+		 * wakelock.c's suspend() will backoff after 1 attempt to
+		 * suspend, which failed during device suspend. Note that if an
+		 * early suspend abort occurs (probably because a wakelock is
+		 * held), we still will try to do actual suspend after that, and
+		 * then we will run this code */
+		/* This option appears to be almost 100% stable, but battery
+		 * life is worse (The phone probably spends at least 50% less
+		 * time suspended) */
+		*suspend_short_count_p = 9;
+	} else {
+		/* Increment suspend_short_count by 8 so that wakelock.c's
+		 * suspend() will backoff after 2 attempts to suspend, which
+		 * might be caused by failure during device suspend, early
+		 * suspend abort caused by wakelock detect. */
+		/* This option is not quite 100% stable (every few days the SD
+		 * card will have a detection error) */
+		*suspend_short_count_p += 8;
+		if (*suspend_short_count_p > 9) {
+			*suspend_short_count_p = 9;
+		}
+	}
 }
 
 static int omap_hsmmc_modifier_resume_noirq(struct device *dev) {

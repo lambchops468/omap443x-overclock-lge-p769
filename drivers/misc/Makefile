@@ -54,7 +54,7 @@ obj-$(CONFIG_OMAP_DIE_TEMP_SENSOR)	+= omap_temp_sensor.o
 obj-$(CONFIG_OMAP443X_DIE_TEMP_SENSOR)	+= omap443x_temp_sensor.o
 obj-$(CONFIG_OMAP443X_CPU_CONTROL)	+= omap443x_cpu_control.o
 obj-$(CONFIG_OMAP_HSMMC_MODIFIER)	+= omap_hsmmc_modifier.o
-obj-$(CONFIG_LG_P769_SUSPEND_RATELIMIT)	+= lg_p769_suspend_ratelimit.o
+obj-$(CONFIG_LG_U2_SUSPEND_RATELIMIT)	+= lg_u2_suspend_ratelimit.o
 #LGE_SJIT 09/28/2011 [mohamed.khadri@lge.com] BT control path 
 obj-$(CONFIG_LBEE9QMB_RFKILL)	+= lbee9qmb-rfkill.o
 obj-$(CONFIG_BD_ADDRESS)       += bd_address.o

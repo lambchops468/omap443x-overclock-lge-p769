@@ -40,7 +40,7 @@
 #include "symsearch/symsearch.h"
 
 // If true, allow only one suspend attempt. Otherwise, alow two.
-static bool allow_one_suspend_attempt = false;
+static bool allow_one_suspend_attempt = true;
 module_param(allow_one_suspend_attempt, bool, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(allow_one_suspend_attempt, "If true, only one device suspend "
 	"attempt is allowed before backing off. Otherwise, allow two.");
@@ -84,6 +84,7 @@ static void suspend_ratelimiter_suspend_recover(void) {
 }
 
 static int __init suspend_ratelimiter_init(void) {
+	SYMSEARCH_BIND_FUNCTION_TO(omap_hsmmc_modifier, suspend_set_ops, suspend_set_ops_s);
 	SYMSEARCH_BIND_POINTER_TO(suspend_ratelimiter, struct platform_suspend_ops*, omap_pm_ops, omap_pm_ops_p);
 	SYMSEARCH_BIND_POINTER_TO(suspend_ratelimiter, unsigned*, suspend_short_count, suspend_short_count_p);
 

@@ -303,7 +303,7 @@ static void gpu_set_oc_opp(void) {
 /*  sysfs */
 static ssize_t cur_freq_show(struct kobject *kobj, struct kobj_attribute *attr,
 		char *buf) {
-	return scnprintf(buf, PAGE_SIZE, "CPU : %lu Mhz\nGPU : %lu Mhz\n",
+	return scnprintf(buf, PAGE_SIZE, "CPU: %lu Mhz, GPU: %lu Mhz\n",
 			clk_get_rate(mpu_clk)/1000000,
 			clk_get_rate(gpu_clk)/1000000);
 }
@@ -587,7 +587,7 @@ int omap_gpu_thermal_rethrottle(bool throttle) {
 
 	pr_info("%s: GPU %s at maximum %lu MHz\n", __func__,
 			throttle ? "throttled" : "unthrottled",
-			gpu_def_ft[GPU_OC_OPP_IDX].rate / 1000000);
+			gpu_def_ft[GPU_OC_OPP_IDX].opp->rate / 1000000);
 
 out:
 	mutex_unlock(&gpu_throttle_mutex);

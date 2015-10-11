@@ -150,6 +150,8 @@ static void throttle_delayed_work_fn(struct work_struct *work);
 /**
  * The OMAP4430 Data Manual says the maximum average temperature of the chip
  * should not exceed 110 deg C and the absolute maximum is 125 deg C.
+ * The PoP memory on top of the OMAP4430 could be limited to as low as 85
+ * deg C, according to random DDR2 PoP datasheets on the internet.
  *
  * Ensure that the temperatures selected are present in the adc_to_temp table.
  */

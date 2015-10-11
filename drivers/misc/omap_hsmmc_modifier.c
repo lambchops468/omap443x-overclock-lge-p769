@@ -52,26 +52,16 @@
  * even with this reinit failure. So everything is probably fine.
  */
 
-#include <linux/clk.h>
 #include <linux/device.h>
-#include <linux/dma-mapping.h>
 #include <linux/err.h>
-#include <linux/io.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/core.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/mmc.h>
 #include <linux/platform_device.h>
-#include <linux/regulator/consumer.h>
-#include <linux/string.h>
 #include <linux/suspend.h>
-#include <linux/workqueue.h>
 
 #include <plat/mmc.h>
-
-#ifdef CONFIG_OMAP4_DPLL_CASCADING
-#include <linux/notifier.h>
-#endif
 
 #include "symsearch/symsearch.h"
 
@@ -173,7 +163,7 @@ static struct device *mmc_host_dev;
 static struct platform_suspend_ops omap_pm_mod_ops;
 
 static void omap_hsmmc_modifier_dev_type_release(struct device *dev) {
-	/* dev is statically allocated */
+	/* dev is statically allocated, no need to dealloc. */
 	return;
 }
 
@@ -253,7 +243,8 @@ static int __init omap_hsmmc_modifier_init(void) {
 
 	device_initialize(&omap_hsmmc_modifier_dev);
 	if (device_add(&omap_hsmmc_modifier_dev)) {
-		pr_err("omap_hsmmc_modifier init failed: Couldn't add fake device.\n");
+		pr_err("omap_hsmmc_modifier init failed: Couldn't add our "
+                       "fake device.\n");
 		return ENODEV;
 	}
 	device_kset = omap_hsmmc_modifier_dev.kobj.kset;
@@ -267,7 +258,7 @@ static int __init omap_hsmmc_modifier_init(void) {
 	}
 
 	if (get_ktype(mmc_kobj) != device_ktype_p) {
-		pr_err("omap_hsmmc_modifier init failed: mmc_kobj is a "
+		pr_err("omap_hsmmc_modifier init failed: mmc_kobj is not a "
 				"device.\n");
 		goto wrong_dev;
 	}

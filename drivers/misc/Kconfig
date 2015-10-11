@@ -579,6 +579,11 @@ config OMAP_HSMMC_MODIFIER
         depends on SYMSEARCH
         default n
 
+config CONFIG_LG_U2_SUSPEND_RATELIMIT
+	tristate "LG P769 Suspend Rate Limiter"
+        depends on SYMSEARCH
+        default n
+
 config TWL6040_VIB
 	bool "TWL6040 Vibrator"
 	depends on TWL6040_CODEC && ANDROID_TIMED_OUTPUT

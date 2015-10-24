@@ -23,4 +23,5 @@ arch/arm/configs/u2_p769_defconfig
 Getting the Ubuntu 14.04 Dependencies required for android-4.1.2 prebuilt:
 sudo dpkg --add-architecture i386
 sudo apt-get update # to pull new packages
+apt-cache search libc6-i386 # For some reason, needed or else package can't be found during install.
 sudo apt-get install libc6-i368 lib32z1

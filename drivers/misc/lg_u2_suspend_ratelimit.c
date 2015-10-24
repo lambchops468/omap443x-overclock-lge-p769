@@ -48,7 +48,7 @@
 #include "symsearch/symsearch.h"
 
 // Number of milliseconds to backoff using the custom wakelock.
-static int custom_backoff_msec = 2500;
+static int custom_backoff_msec = 3300;
 module_param(custom_backoff_msec, int, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(custom_backoff_msec, "If set >zero, we'll only allow "
         "one suspend attempt and backoff this many milliseconds. If set to "
